@@ -19,9 +19,6 @@ adversarially checked, the verdict here incorporates the corrected facts.
 > [enhancements.md](enhancements.md)) over this file. Kept for the *why*, not the
 > *what-is-now*.
 
-Verified project facts (against the live repo at
-`/Users/recursive/workspace/projects/github/onboard`):
-
 - Module path: `github.com/VerifiedOrganic/onboard`
 - Go module target: `1.25` (CI builds with Go `1.26`)
 - `main` is at the **repo root** (`main.go` calls `cmd.Execute()`)

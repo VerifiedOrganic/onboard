@@ -103,4 +103,4 @@ code-graph engine (`recon`, `trace_flow`, `impact`, `repo_map`, `context_pack`,
 transports, and the optional Go/Rust semantic precision layers. CI runs test + vet +
 golangci-lint + a cross-build matrix; releases ship via GoReleaser.
 
-Requires Go 1.25 or newer to build. Author: recursive.
+Requires Go 1.25 or newer to build.
