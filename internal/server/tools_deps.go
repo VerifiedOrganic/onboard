@@ -27,9 +27,20 @@ type depsInput struct {
 }
 
 type dependency struct {
-	Name    string `json:"name"`
-	Version string `json:"version,omitempty"`
-	Dev     bool   `json:"dev,omitempty"` // development-only dependency
+	Name     string `json:"name"`
+	Version  string `json:"version,omitempty"`
+	Kind     string `json:"kind,omitempty"`   // normal | dev | build, when the ecosystem exposes it
+	Target   string `json:"target,omitempty"` // target cfg for platform-specific deps
+	Optional bool   `json:"optional,omitempty"`
+	Dev      bool   `json:"dev,omitempty"` // development-only dependency
+}
+
+type rustTarget struct {
+	Name       string   `json:"name"`
+	Kind       []string `json:"kind,omitempty"`
+	CrateTypes []string `json:"crate_types,omitempty"`
+	SrcPath    string   `json:"src_path,omitempty"`
+	Edition    string   `json:"edition,omitempty"`
 }
 
 type manifestDeps struct {
@@ -38,6 +49,7 @@ type manifestDeps struct {
 	Module    string       `json:"module,omitempty"`
 	Direct    []dependency `json:"direct"`
 	Indirect  int          `json:"indirect,omitempty"` // count of indirect deps (go.mod)
+	Targets   []rustTarget `json:"targets,omitempty"`  // Cargo targets, when Cargo metadata is available
 }
 
 type depsOutput struct {
@@ -48,7 +60,7 @@ type depsOutput struct {
 	Note        string         `json:"note,omitempty"`
 }
 
-func depsExtract(_ context.Context, in depsInput) (depsOutput, error) {
+func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 	out := depsOutput{}
 	root, err := resolveRoot(in.Root)
 	if err != nil {
@@ -76,6 +88,14 @@ func depsExtract(_ context.Context, in depsInput) (depsOutput, error) {
 		return nil
 	})
 
+	if cargo, ok := loadCargoMetadata(ctx, root); ok {
+		for i := range out.Manifests {
+			if md, found := cargo[out.Manifests[i].Manifest]; found {
+				out.Manifests[i] = md
+			}
+		}
+	}
+
 	sort.Slice(out.Manifests, func(i, j int) bool { return out.Manifests[i].Manifest < out.Manifests[j].Manifest })
 	for _, m := range out.Manifests {
 		out.TotalDirect += len(m.Direct)
@@ -88,7 +108,7 @@ func depsExtract(_ context.Context, in depsInput) (depsOutput, error) {
 	if in.Format == "mermaid" {
 		out.Mermaid, out.Truncated = renderDepsMermaid(out.Manifests)
 	}
-	out.Note = "Direct dependencies parsed from manifests (facts, not inferred). Versions reflect the manifest's declared constraint, not the resolved lockfile version."
+	out.Note = "Direct dependencies parsed from manifests (facts, not inferred). Rust manifests are upgraded with `cargo metadata --no-deps` when available; versions reflect declared constraints, not resolved lockfile versions."
 	return out, nil
 }
 

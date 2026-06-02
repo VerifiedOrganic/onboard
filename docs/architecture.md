@@ -24,8 +24,8 @@ them makes the rest of the code predictable.
    the call-graph engine uses a *pure-Go* tree-sitter reimplementation
    ([`gotreesitter`](https://github.com/odvcencio/gotreesitter)) instead of the more
    mature CGo bindings, why ~200 language grammars are embedded into the binary, and why
-   any toolchain-dependent precision layer (e.g. `go/packages`) is kept optional and
-   behind a runtime capability check — never a hard dependency. `CGO_ENABLED=0` builds
+   any toolchain-dependent precision layer (e.g. `go/packages` or `rust-analyzer`) is kept
+   optional and behind a runtime capability check — never a hard dependency. `CGO_ENABLED=0` builds
    for darwin/linux/windows × amd64/arm64 from one runner.
 
 2. **Honesty over false precision.** By default the call graph is built from *syntactic*
@@ -33,10 +33,11 @@ them makes the rest of the code predictable.
    out loud: edges are presented as "likely, not proven," ambiguous names are left
    **unresolved rather than guessed** (guessing would manufacture false edges,
    `internal/providers/builtin.go`), and every `impact` result carries a caveat `Note`.
-   The one exception is opt-in: for a Go module with the `go` toolchain present, `precise`
-   enriches the graph with type-checked edges (`internal/providers/goprecision.go`), and the
-   note upgrades from "likely" to "proven" for those edges (`edgeCaveat`,
-   `internal/server/graph_index.go`).
+   The exceptions are opt-in: for a Go module with the `go` toolchain present, `precise`
+   enriches the graph with type-checked edges (`internal/providers/goprecision.go`); for a
+   Rust Cargo project with `rust-analyzer` present, it enriches through LSP call hierarchy
+   (`internal/providers/rustprecision.go`). The note upgrades from "likely" to semantic
+   caveats for those edges (`edgeCaveat`, `internal/server/graph_index.go`).
 
 3. **Graceful degradation, not hard failure.** Missing a git repo, an unsupported
    language, or a thin graph yields a populated `Note` field and a still-useful result,
@@ -106,7 +107,7 @@ flowchart TD
 | `cmd/` | Cobra CLI: `root`, `serve`, `install`, `init`, `skills`. Holds the `-ldflags`-stamped `version`/`commit`/`date` vars. |
 | `internal/server/` | The MCP server. `server.go` constructs `*mcp.Server` and registers all 15 tools; `tools_*.go` implement them; `graph_index.go` holds the shared per-root graph cache (`indexGraph`); `sqlddl.go` and `manifests.go` are the parsers behind `schema`/`deps`; `map_render.go` is `render_map`'s Mermaid/HTML rendering; `resources.go`/`prompts.go` add the resource and prompt surfaces. |
 | `internal/skills/` | Embedded skill bundles (`//go:embed all:assets`) and a deliberately naive frontmatter parser. |
-| `internal/providers/` | The code-graph engine: the `Provider` interface, the `Builtin` tree-sitter provider, the `Null` regex fallback, the `Graph`/`Symbol` model with name+scope resolution, PageRank ranking (`pagerank.go`), and the opt-in type-checked Go precision layer (`goprecision.go`). |
+| `internal/providers/` | The code-graph engine: the `Provider` interface, the `Builtin` tree-sitter provider, the `Null` regex fallback, the `Graph`/`Symbol` model with name+scope resolution, PageRank ranking (`pagerank.go`), and opt-in semantic precision layers for Go (`goprecision.go`) and Rust (`rustprecision.go`). |
 | `internal/guide/` | The durable, SHA-tagged guide cache: path resolution, header format, read/write. |
 | `internal/git/` | Thin wrappers over the `git` CLI: availability, common-dir, HEAD SHA, branch, `diff --name-status`, and per-file churn/ownership history. |
 | `internal/agents/` | The installer: the agent registry/detection (`agents.go`) and the never-clobber JSON/TOML MCP-config writers (`agent_config.go`), for five agents. |

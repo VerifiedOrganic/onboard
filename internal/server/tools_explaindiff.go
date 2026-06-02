@@ -22,7 +22,7 @@ type explainDiffInput struct {
 	Root    string `json:"root,omitempty" jsonschema:"repo root; defaults to the working directory"`
 	Base    string `json:"base,omitempty" jsonschema:"git ref to compare against (branch, tag, or SHA); defaults to the merge-base with the default branch (origin/main, main, master)"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"max changed symbols to detail, by blast radius (default 50)"`
-	Precise bool   `json:"precise,omitempty" jsonschema:"for Go modules, use type-checked edges so the blast radius includes interface-dispatch callers; slower, requires the go toolchain"`
+	Precise bool   `json:"precise,omitempty" jsonschema:"for Go modules, use type-checked edges; for Rust Cargo projects, use rust-analyzer call hierarchy when available; slower, requires the language toolchain"`
 	Refresh bool   `json:"refresh,omitempty" jsonschema:"re-index the repo instead of using the cached graph"`
 }
 
@@ -122,7 +122,7 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 			trans := g.Impact(sym.QName)
 			for _, q := range trans {
 				impactedUnion[q] = true
-				if ts := g.Defs[q]; ts != nil && isTestFile(ts.File) {
+				if ts := g.Defs[q]; isTestSymbol(ts) {
 					atRiskTests[q] = true
 				}
 			}

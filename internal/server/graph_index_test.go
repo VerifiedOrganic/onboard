@@ -29,3 +29,15 @@ func TestGoPrecisionHint(t *testing.T) {
 		})
 	}
 }
+
+func TestIsTestSymbolIncludesRustInlineTests(t *testing.T) {
+	if !isTestSymbol(&providers.Symbol{File: "src/lib.rs", Lang: "rust", Test: true}) {
+		t.Error("Rust #[test] symbols in src/*.rs should count as tests")
+	}
+	if !isTestSymbol(&providers.Symbol{File: "tests/integration.rs", Lang: "rust"}) {
+		t.Error("Rust integration tests should count as tests by path")
+	}
+	if isTestSymbol(&providers.Symbol{File: "src/lib.rs", Lang: "rust"}) {
+		t.Error("plain Rust library symbols should not count as tests")
+	}
+}

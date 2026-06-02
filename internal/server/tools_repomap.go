@@ -36,7 +36,7 @@ type repoMapInput struct {
 	Focus       []string `json:"focus,omitempty" jsonschema:"optional symbols, repo-relative files, or qualified names to bias the ranking toward (personalized PageRank)"`
 	MaxTokens   int      `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the rendered map (default 1000)"`
 	ChurnWeight *float64 `json:"churn_weight,omitempty" jsonschema:"how much git churn influences the ranking, 0..1 (default 0.3); 0 ranks by call-graph centrality alone; ignored outside a git repo"`
-	Precise     bool     `json:"precise,omitempty" jsonschema:"for Go modules, enrich the graph with type-checked edges before ranking; slower, requires the go toolchain"`
+	Precise     bool     `json:"precise,omitempty" jsonschema:"for Go modules, enrich with type-checked edges; for Rust Cargo projects, enrich with rust-analyzer call hierarchy when available; slower, requires the language toolchain"`
 	Refresh     bool     `json:"refresh,omitempty" jsonschema:"re-index the repo instead of using the cached graph"`
 }
 
@@ -162,7 +162,7 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 		out.Note = "Ranked by call-graph centrality (PageRank) over syntactic edges — a strong orientation signal, not a proof of importance. No git churn applied."
 	}
 	if g.Precise {
-		out.Note += " Go call edges are type-checked (proven, incl. interface dispatch)."
+		out.Note += " " + edgeCaveat(g)
 	}
 	return out, nil
 }

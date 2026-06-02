@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -169,6 +170,67 @@ func TestBuiltinCapturesMethodReceiver(t *testing.T) {
 	}
 	if got := bySymbol["Plain"]; got == nil || got.Recv != "" || got.Display() != "Plain" {
 		t.Errorf("Plain: a plain function must have no receiver; got recv=%q display=%q", recvOf(got), displayOf(got))
+	}
+}
+
+func TestRustOwnerHelpers(t *testing.T) {
+	src := []byte("pub struct Engine;\n" +
+		"impl Engine {\n" +
+		"    pub fn new() -> Self { Engine }\n" +
+		"}\n" +
+		"trait Parser { fn parse(&self); }\n" +
+		"impl Parser for Engine {\n" +
+		"    #[test]\n" +
+		"    fn parse(&self) {}\n" +
+		"}\n")
+	newStart := uint32(strings.Index(string(src), "new"))
+	parseDecl := uint32(strings.LastIndex(string(src), "fn parse"))
+	parseStart := uint32(strings.LastIndex(string(src), "parse"))
+
+	if got := rustOwner(src, newStart); got != "Engine" {
+		t.Errorf("owner(new) = %q, want Engine", got)
+	}
+	if got := rustOwner(src, parseStart); got != "Engine as Parser" {
+		t.Errorf("owner(parse) = %q, want Engine as Parser", got)
+	}
+	if !rustDefinitionIsTest(src, parseDecl) {
+		t.Error("parse should be marked as a Rust test from its attribute")
+	}
+}
+
+func TestBuiltinRustDisplayAndInlineTest(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "lib.rs", "pub struct Engine;\n"+
+		"impl Engine {\n"+
+		"    pub fn new() -> Self { Engine }\n"+
+		"}\n"+
+		"impl Parser for Engine {\n"+
+		"    #[test]\n"+
+		"    fn parse(&self) {}\n"+
+		"}\n"+
+		"trait Parser { fn parse(&self); }\n")
+
+	g, err := Builtin{}.Index(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Files == 0 {
+		t.Skipf("rust grammar/tags not available in this build; note: %s", g.Note)
+	}
+	var sawOwned, sawTest bool
+	for _, s := range g.Defs {
+		if s.Name == "new" && s.Recv == "Engine" && s.Display() == "Engine::new" {
+			sawOwned = true
+		}
+		if s.Name == "parse" && s.Test {
+			sawTest = true
+		}
+	}
+	if !sawOwned {
+		t.Errorf("expected Engine::new display in Rust defs, got %v", defNames(g))
+	}
+	if !sawTest {
+		t.Errorf("expected #[test] Rust function marked as Test, got %v", defNames(g))
 	}
 }
 

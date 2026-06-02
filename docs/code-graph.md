@@ -4,7 +4,7 @@ This is the heart of `onboard`, and the part most worth understanding before you
 anything: a pure-Go engine that turns a repository into a queryable call graph, with the
 `recon` structural scan and `render_map` rendering built on top. It's the source of every
 *fact* the skills teach from — and the reason onboard can be honest about what it doesn't
-know, because this is where "syntactic rumour vs type-checked affidavit" actually lives.
+know, because this is where "syntactic rumour vs semantic evidence" actually lives.
 
 The defining constraint is the [single static CGo-free binary](architecture.md#design-principles).
 That rules out the mature CGo tree-sitter bindings, so the engine uses
@@ -16,9 +16,12 @@ S-expression query engine, all building under `CGO_ENABLED=0` to every target.
 
 ## recon
 
-`recon` (`internal/server/tools_recon.go`) is a single `filepath.WalkDir` that reads only
-file *names* (and one directory listing for `.github/workflows`). It never opens source
-files, which keeps it instant and dependency-free.
+`recon` (`internal/server/tools_recon.go`) is mostly a single `filepath.WalkDir` over file
+*names* (plus one directory listing for `.github/workflows`). Rust gets one deliberate
+extra: a capped, lightweight `.rs` text scan for `#[test]` / `#[cfg(test)]` and obvious risk
+patterns (`unsafe`, `.unwrap()`, `.expect(...)`, `panic!`, `todo!`, ignored values), because
+Rust unit tests commonly live inside normal `src/*.rs` files and cannot be detected from the
+path alone.
 
 Per file it runs five independent matches:
 
@@ -29,6 +32,10 @@ Per file it runs five independent matches:
 | **Entry points** | basename ∈ {`main`, `index`, `app`, `server`} and the path doesn't contain `test`. |
 | **Test layout** | `*_test.go`, `*.spec.*`, `*.test.*`, or `test_*`; records the *directory*. |
 | **Tooling** | `Dockerfile`/`docker-compose*`→Docker, `.env.example`, `.eslintrc*`→ESLint, `.golangci.y[a]ml`→golangci-lint, `Makefile`→Make; plus `.github/workflows/`→GitHub Actions. |
+
+Rust also reports `rust_targets` when `cargo metadata --format-version=1 --no-deps` can run,
+and `risk_hints` is capped to keep recon concise on large crates. Without Cargo, the plain
+manifest/file scan still works.
 
 Pruned directories: `node_modules`, `vendor`, `dist`, `build`, `__pycache__`, `target`,
 `venv`, `coverage`, `bin`, `obj`, and any dotdir except `.github`. The `dir_tree` is a
@@ -123,9 +130,9 @@ guessed. This is covered by `TestBuiltinSameFileNameClashLeftUnresolved`,
 `TestBuiltinSamePackageMethodClashStaysUnresolved` (the directory tier must not weaken
 precision), and `TestBuiltinSamePackageResolution` (the recall it recovers).
 
-Method and interface-dispatch calls that remain unresolved after this are exactly what the
-type-checked Go precision layer resolves; `trace_flow` / `impact` surface a hint pointing at
-`precise:true` when a Go graph still has unresolved calls (`goPrecisionHint`).
+Method and dispatch calls that remain unresolved after this are what optional precision
+layers can recover; `trace_flow` / `impact` surface a hint pointing at `precise:true` when a
+Go graph still has unresolved calls (`goPrecisionHint`).
 
 ## Providers and fallback
 
@@ -306,7 +313,9 @@ exception, `routes`, noted below).
 
 - **`deps`** — parses dependency manifests (`go.mod` via `x/mod/modfile`, `package.json`,
   `requirements.txt`, `Cargo.toml`) into direct dependencies per manifest, optionally a
-  Mermaid flowchart. A parsed `require` line *is* a dependency.
+  Mermaid flowchart. Rust manifests are upgraded with `cargo metadata --no-deps` when Cargo
+  is available, which adds target/dependency-kind detail. A parsed `require` line *is* a
+  dependency.
 - **`schema`** — parses SQL DDL (`CREATE TABLE`) by capturing each balanced parenthesized
   table body, splitting it at paren-depth-0 commas (so `DECIMAL(10,2)` survives), and
   classifying each definition as a column or a primary/foreign-key constraint → entities,
@@ -338,7 +347,13 @@ The code states this in the package doc (`provider.go`), in `Builtin.Index`'s `N
 and in `impact`'s always-present `Note`. Present syntactic results as **likely, not
 proven** — but see the precision layer below, which upgrades specific edges to *proven*.
 
-### The Go precision layer (opt-in, type-checked)
+### Precision layers (opt-in semantic)
+
+`precise: true` asks language tooling to enrich the universal syntactic graph. Each layer is
+strictly additive, capability-gated, timeout-bounded, and safe to fail: if the backend cannot
+run, the graph stays exactly as the tree-sitter pass built it.
+
+#### Go: type-checked call graph
 
 `internal/providers/goprecision.go`. When a caller passes `precise: true` to an edge tool
 (`trace_flow`, `impact`, `repo_map`, `context_pack`) **and** the target is a Go module with
@@ -363,7 +378,21 @@ module — is capability-gated. Absent it, `EnrichGo` is a no-op and the graph s
 the syntactic pass built it. The work is bounded by a 90s context on `packages.Load` and is
 panic-safe, so an analysis failure degrades silently to the syntactic graph.
 
+#### Rust: rust-analyzer call hierarchy
+
+`internal/providers/rustprecision.go`. When `precise: true` is requested for a Rust Cargo
+project and `rust-analyzer` is on `PATH`, `EnrichRust` starts rust-analyzer over stdio LSP,
+initializes it with the repo root, and asks `textDocument/prepareCallHierarchy` plus
+`callHierarchy/outgoingCalls` for Rust function/method definitions. Returned call targets are
+mapped back to onboard symbols by `(file, line, name)` with an unambiguous `(file, line)`
+fallback, then merged into `Forward`/`Reverse` and recorded in `Graph.ProvenEdges`.
+
+This keeps Rust first-class without adding Rust crates or CGo to onboard itself. The
+tree-sitter layer remains the zero-setup fallback; rust-analyzer is an optional runtime
+capability. The Rust pass is capped to 300 callable symbols and bounded by a 75s context so
+large crates do not hang an agent session.
+
 **Known scope (v0):** precise results are computed per request and held only in the in-memory
 graph cache (not persisted to the on-disk index), so the first precise query on a cold server
-re-runs the analysis. SCIP ingestion and an LSP provider remain on the roadmap
-([enhancements.md](enhancements.md) §2.1).
+re-runs the analysis. SCIP ingestion remains on the roadmap ([enhancements.md](enhancements.md)
+§2.1).

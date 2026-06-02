@@ -77,10 +77,11 @@ func indexGraph(ctx context.Context, root string, refresh, precise bool) (*provi
 			g = ng
 		}
 	}
-	// Optional type-checked enrichment. Safe to mutate g in place: it was just built here and
-	// is not yet shared. Non-fatal — a missing Go toolchain or module leaves g syntactic.
+	// Optional semantic enrichment. Safe to mutate g in place: it was just built here and
+	// is not yet shared. Non-fatal — missing language toolchains leave g syntactic.
 	if precise {
 		_, _ = providers.EnrichGo(ctx, root, g)
+		_, _ = providers.EnrichRust(ctx, root, g)
 	}
 	graphCacheMu.Lock()
 	graphCache[key] = g
@@ -104,7 +105,17 @@ func graphCachePath(root string) string {
 // layer has proven some of them.
 func edgeCaveat(g *providers.Graph) string {
 	if g.Precise {
-		return "Go call edges are type-checked (proven, including interface dispatch); any non-Go or unresolved edges remain syntactic (likely, not proven)."
+		var parts []string
+		if strings.Contains(g.Precision, "go") {
+			parts = append(parts, "Go call edges are type-checked (proven, including interface dispatch)")
+		}
+		if strings.Contains(g.Precision, "rust-analyzer") {
+			parts = append(parts, "Rust call edges were enriched through rust-analyzer call hierarchy")
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "Some call edges were enriched by a semantic backend")
+		}
+		return strings.Join(parts, "; ") + "; any unresolved edges remain syntactic (likely, not proven)."
 	}
 	return "Edges are syntactic (name + lexical scope), not type-checked: callers via dynamic dispatch or reflection may be missed, and same-named symbols may add noise. Treat as a strong lead, not a proof."
 }
@@ -133,8 +144,12 @@ func goPrecisionHint(g *providers.Graph, requestedPrecise bool) string {
 		" with type-checked edges.", g.Unresolved)
 }
 
+func semanticPrecisionUnavailableNote() string {
+	return "Semantic enrichment was requested but no supported backend could run for this repo. "
+}
+
 // isTestFile reports whether a repo-relative path is a test file, by the conventions of the
-// common ecosystems (Go, JS/TS, Python).
+// common ecosystems (Go, JS/TS, Python, Rust).
 func isTestFile(path string) bool {
 	base := filepath.Base(path)
 	if strings.HasSuffix(base, "_test.go") ||
@@ -144,5 +159,18 @@ func isTestFile(path string) bool {
 		return true
 	}
 	slashed := "/" + filepath.ToSlash(path) + "/"
-	return strings.Contains(slashed, "/tests/") || strings.Contains(slashed, "/__tests__/")
+	if strings.Contains(slashed, "/tests/") || strings.Contains(slashed, "/__tests__/") {
+		return true
+	}
+	if strings.HasSuffix(base, ".rs") {
+		return strings.Contains(slashed, "/benches/")
+	}
+	return false
+}
+
+func isTestSymbol(sym *providers.Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	return sym.Test || isTestFile(sym.File)
 }

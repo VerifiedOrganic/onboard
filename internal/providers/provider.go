@@ -30,12 +30,20 @@ type Symbol struct {
 	Kind  string `json:"kind"` // function, method, class, ...
 	File  string `json:"file"` // repo-relative path
 	Line  int    `json:"line"` // 1-based
-	Lang  string `json:"lang"`
-	// Recv is the receiver type for a method, e.g. "HTMLRenderer" for
-	// func (h *HTMLRenderer) Render(). Empty for non-methods. Name stays the BARE
-	// identifier (so it agrees with the type checker's fn.Name() during Go precise
-	// enrichment); Recv is additive metadata used only to qualify display output.
+	// Column is the zero-based byte column of the name identifier. It is omitted when a
+	// provider cannot recover one, but tree-sitter-backed symbols set it so precision
+	// layers can address LSP positions.
+	Column int    `json:"column,omitempty"`
+	Lang   string `json:"lang"`
+	// Recv is the receiver/owner type for a method or associated item, e.g.
+	// "HTMLRenderer" for func (h *HTMLRenderer) Render() or "Engine" for
+	// impl Engine { fn run(...) }. Empty for unowned functions. Name stays the BARE
+	// identifier (so it agrees with semantic backends); Recv is additive metadata used only
+	// to qualify display output.
 	Recv string `json:"recv,omitempty"`
+	// Test marks test entry points even when the file path does not identify them, notably
+	// Rust unit tests living inside src/*.rs behind #[test] / #[cfg(test)].
+	Test bool `json:"test,omitempty"`
 }
 
 // Display returns the human-facing name: a method is qualified by its receiver type
@@ -43,6 +51,9 @@ type Symbol struct {
 // plain function returns its bare name.
 func (s *Symbol) Display() string {
 	if s.Recv != "" {
+		if strings.EqualFold(s.Lang, "rust") {
+			return s.Recv + "::" + s.Name
+		}
 		return s.Recv + "." + s.Name
 	}
 	return s.Name
@@ -64,6 +75,7 @@ type Graph struct {
 	// keyed by edgeKey — those edges are proven, not merely the syntactic "likely" the base
 	// graph provides. ProvenEdges is never serialized; it backs the honesty note only.
 	Precise     bool            `json:"precise,omitempty"`
+	Precision   string          `json:"precision,omitempty"` // comma-separated semantic backends, e.g. go,rust-analyzer
 	ProvenEdges map[string]bool `json:"-"`
 
 	// Incremental-indexing stats: how many files were reused from the on-disk cache
@@ -78,6 +90,25 @@ func edgeKey(caller, callee string) string { return caller + "\x00" + callee }
 // (type-checked), as opposed to inferred syntactically.
 func (g *Graph) IsProven(caller, callee string) bool {
 	return g.ProvenEdges[edgeKey(caller, callee)]
+}
+
+// MarkPrecision records that a semantic backend enriched the graph. It is idempotent and
+// keeps a compact comma-separated list so API output can explain which language layer ran.
+func (g *Graph) MarkPrecision(kind string) {
+	if kind == "" {
+		return
+	}
+	g.Precise = true
+	for _, existing := range strings.Split(g.Precision, ",") {
+		if existing == kind {
+			return
+		}
+	}
+	if g.Precision == "" {
+		g.Precision = kind
+		return
+	}
+	g.Precision += "," + kind
 }
 
 // Provider indexes a repository into a Graph.

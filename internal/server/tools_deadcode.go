@@ -21,7 +21,7 @@ import (
 type deadCodeInput struct {
 	Root    string `json:"root,omitempty" jsonschema:"repo root; defaults to the working directory"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"max orphans to return, highest-confidence first (default 50)"`
-	Precise bool   `json:"precise,omitempty" jsonschema:"for Go modules, resolve interface-dispatch callers first so methods aren't falsely flagged; slower, requires the go toolchain"`
+	Precise bool   `json:"precise,omitempty" jsonschema:"for Go modules, resolve interface-dispatch callers; for Rust Cargo projects, enrich with rust-analyzer call hierarchy when available; slower, requires the language toolchain"`
 	Refresh bool   `json:"refresh,omitempty" jsonschema:"re-index the repo instead of using the cached graph"`
 }
 
@@ -67,7 +67,7 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 			continue // only callables can be "uncalled"
 		}
 		out.Scanned++
-		if isTestFile(sym.File) || isEntryName(sym.Name) {
+		if isTestSymbol(sym) || isEntryName(sym.Name) {
 			continue // toolchain/runtime-invoked: never dead
 		}
 		if len(g.Callers(q)) > 0 {
@@ -145,9 +145,9 @@ func isExported(name string) bool {
 func orphanConfidence(kind string, exported, precise bool) (confidence, reason string) {
 	switch {
 	case kind == "method" && !precise:
-		return "low", "method with no syntactic caller — may be reached via interface dispatch; pass precise:true to confirm"
+		return "low", "method with no syntactic caller — may be reached via dispatch the syntactic graph cannot resolve; pass precise:true to confirm when a semantic backend is available"
 	case kind == "method":
-		return "medium", "method with no caller even after type-checked dispatch resolution"
+		return "medium", "method with no caller even after available semantic dispatch resolution"
 	case exported:
 		return "medium", "exported function with no in-repo caller — may be public API or used by an external importer"
 	default:
@@ -165,7 +165,7 @@ func deadCodeNote(g *providers.Graph, requestedPrecise bool) string {
 func registerDeadCodeTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "dead_code",
-		Description: "Find callable definitions (functions and methods) that nothing in the repo calls — a lead for code that was written but never wired in (common in fast/AI builds). Ranked by confidence; excludes entry points and tests. Leads, not proof: reflection, codegen, framework registration, and external importers can hide callers (pass precise:true for type-checked Go dispatch).",
+		Description: "Find callable definitions (functions and methods) that nothing in the repo calls — a lead for code that was written but never wired in (common in fast/AI builds). Ranked by confidence; excludes entry points and tests. Leads, not proof: reflection, codegen, framework registration, and external importers can hide callers (pass precise:true for Go or Rust semantic enrichment when available).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in deadCodeInput) (*mcp.CallToolResult, deadCodeOutput, error) {
 		out, err := deadCode(ctx, in)
 		return nil, out, err

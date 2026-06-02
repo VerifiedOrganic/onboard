@@ -18,7 +18,7 @@ type traceFlowInput struct {
 	Entry   string `json:"entry" jsonschema:"symbol to trace from: a function name, file::name, or a qualified-name substring"`
 	Depth   int    `json:"depth,omitempty" jsonschema:"max call depth to follow (default 4)"`
 	Format  string `json:"format,omitempty" jsonschema:"set to \"mermaid\" to also return the trace as a Mermaid sequenceDiagram"`
-	Precise bool   `json:"precise,omitempty" jsonschema:"for Go modules, enrich the graph with type-checked edges (resolves interface dispatch); slower, requires the go toolchain"`
+	Precise bool   `json:"precise,omitempty" jsonschema:"for Go modules, enrich with type-checked edges; for Rust Cargo projects, enrich with rust-analyzer call hierarchy when available; slower, requires the language toolchain"`
 	Refresh bool   `json:"refresh,omitempty" jsonschema:"re-index the repo instead of using the cached graph"`
 }
 
@@ -74,7 +74,7 @@ func traceFlow(ctx context.Context, in traceFlowInput) (traceFlowOutput, error) 
 	case g.Provider == "null":
 		out.Note = "Definitions-only provider: no call graph available, so the trace shows the entry symbol alone."
 	case in.Precise && !g.Precise:
-		out.Note = "Type-checked enrichment was requested but unavailable (no go toolchain or module); edges are syntactic. " + edgeCaveat(g)
+		out.Note = semanticPrecisionUnavailableNote() + edgeCaveat(g)
 	default:
 		out.Note = edgeCaveat(g) + goPrecisionHint(g, in.Precise)
 	}
@@ -188,7 +188,7 @@ func seqToken(s string) string {
 type impactInput struct {
 	Root    string `json:"root,omitempty" jsonschema:"repo root; defaults to the working directory"`
 	Symbol  string `json:"symbol" jsonschema:"symbol whose blast radius to compute: a function name, file::name, or qualified-name substring"`
-	Precise bool   `json:"precise,omitempty" jsonschema:"for Go modules, enrich the graph with type-checked edges (resolves interface dispatch) so the blast radius includes dynamically-dispatched callers; slower, requires the go toolchain"`
+	Precise bool   `json:"precise,omitempty" jsonschema:"for Go modules, enrich with type-checked edges; for Rust Cargo projects, enrich with rust-analyzer call hierarchy when available; slower, requires the language toolchain"`
 	Refresh bool   `json:"refresh,omitempty" jsonschema:"re-index the repo instead of using the cached graph"`
 }
 
@@ -238,13 +238,13 @@ func impactAnalysis(ctx context.Context, in impactInput) (impactOutput, error) {
 	out.TransitiveCallers = g.Impact(matched)
 	out.ImpactedCount = len(out.TransitiveCallers)
 	for _, q := range out.TransitiveCallers {
-		if sym := g.Defs[q]; sym != nil && isTestFile(sym.File) {
+		if sym := g.Defs[q]; isTestSymbol(sym) {
 			out.AtRiskTests = append(out.AtRiskTests, q)
 		}
 	}
 	out.Note = edgeCaveat(g) + goPrecisionHint(g, in.Precise)
 	if in.Precise && !g.Precise {
-		out.Note = "Type-checked enrichment was requested but unavailable (no go toolchain or module). " + out.Note
+		out.Note = semanticPrecisionUnavailableNote() + out.Note
 	}
 	return out, nil
 }

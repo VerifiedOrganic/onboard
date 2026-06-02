@@ -40,8 +40,9 @@ Conventions shared by most tools:
   directory.
 - `refresh` (graph tools) — bypass the per-root cached graph and re-index.
 - `precise` (graph tools: `trace_flow`, `impact`, `repo_map`, `context_pack`) — for Go
-  modules, enrich the graph with type-checked edges (resolves interface dispatch); opt-in
-  because it builds the program, and a silent no-op without the `go` toolchain.
+  modules, enrich the graph with type-checked edges; for Rust Cargo projects, enrich through
+  `rust-analyzer` call hierarchy when available. It is opt-in because language tooling has
+  to load the project, and a silent no-op without a supported backend.
 
 ---
 
@@ -76,7 +77,7 @@ Conventions shared by most tools:
 ## Structural scan
 
 ### `recon`
-*`internal/server/tools_recon.go`* — Phase-1 reconnaissance: detect stack, frameworks, entry points, test layout, tooling, a pruned directory tree, and (in a git repo) the highest-churn hotspot files. A fast structural scan that **reads no source beyond manifest filenames**. Pure Go, no native deps.
+*`internal/server/tools_recon.go`* — Phase-1 reconnaissance: detect stack, frameworks, entry points, test layout, tooling, Rust targets/risk hints, a pruned directory tree, and (in a git repo) the highest-churn hotspot files. It is primarily filename/manifest based, with a capped Rust `.rs` scan for test attributes and obvious risk patterns. Pure Go, no native deps.
 
 **Input:**
 | Field | JSON | Type | Description |
@@ -135,7 +136,7 @@ follow to the destination path, and binary files count as zero lines. Degrades g
 |-------|------|------|-------------|
 | Root | `root` | string (opt) | repo root |
 | Limit | `limit` | int (opt) | max orphans, highest-confidence first (default 50) |
-| Precise | `precise` | bool (opt) | resolve Go interface-dispatch callers first so methods aren't falsely flagged |
+| Precise | `precise` | bool (opt) | resolve semantic callers first when Go or Rust backends are available so methods aren't falsely flagged |
 | Refresh | `refresh` | bool (opt) | re-index instead of using the cached graph |
 
 **Output:**
@@ -145,7 +146,7 @@ follow to the destination path, and binary files count as zero lines. Degrades g
 | Scanned | `scanned_callables` | int | functions + methods considered |
 | TotalFound | `total_found` | int | orphans before the limit |
 | Truncated | `truncated` | bool | more orphans than the limit |
-| Note | `note` | string | the leads-not-verdicts caveat (+ Go precision hint when applicable) |
+| Note | `note` | string | the leads-not-verdicts caveat (+ precision hints when applicable) |
 
 **Confidence** reflects what the graph can and cannot see: `high` for an unexported function (nothing outside the repo can reach it), `medium` for an exported function (possible external importer) or an uncalled method *after* precise dispatch resolution, `low` for a method without precise (interface dispatch unresolved). The note is explicit that reflection, code generation, framework/DI registration, build-tagged files, and external importers can all hide a caller — **leads, not verdicts**.
 
@@ -158,7 +159,7 @@ follow to the destination path, and binary files count as zero lines. Degrades g
 | Root | `root` | string (opt) | repo root |
 | Base | `base` | string (opt) | ref to compare against; defaults to the merge-base with the default branch (`origin/main`, `main`, `master`) |
 | Limit | `limit` | int (opt) | max changed symbols to detail, by blast radius (default 50) |
-| Precise | `precise` | bool (opt) | type-checked Go edges so the radius includes interface-dispatch callers |
+| Precise | `precise` | bool (opt) | semantic Go/Rust edges when available so the radius includes dispatch callers |
 | Refresh | `refresh` | bool (opt) | re-index instead of using the cached graph |
 
 **Output:**
@@ -187,10 +188,12 @@ limits.
 **Precision (`precise: true`).** `trace_flow`, `impact`, `repo_map`, and `context_pack`
 accept a `precise` flag. For a Go module with the `go` toolchain available, it enriches the
 graph with **type-checked** edges (VTA over the SSA call graph), most importantly resolving
-**interface dispatch** that the syntactic pass leaves unresolved. Those edges are *proven*,
-so the tool's `note` upgrades accordingly. It is opt-in because it builds the program (slower
-than the syntactic graph) and is cached separately per root; outside a Go module it is a
-silent no-op. See [code-graph.md](code-graph.md#the-go-precision-layer-opt-in-type-checked).
+**interface dispatch** that the syntactic pass leaves unresolved. For a Rust Cargo project
+with `rust-analyzer` available, it enriches call edges through LSP call hierarchy. Those
+semantic edges are recorded separately from syntactic ones, so the tool's `note` upgrades
+accordingly. It is opt-in because language tooling has to load the project (slower than the
+syntactic graph) and is cached separately per root; without a supported backend it is a
+silent no-op. See [code-graph.md](code-graph.md#precision-layers-opt-in-semantic).
 
 ### `trace_flow`
 *`internal/server/tools_graph.go`* — Trace an execution flow from an entry symbol through its callees, breadth-first to a depth. Backed by a syntactic call graph.
@@ -202,7 +205,7 @@ silent no-op. See [code-graph.md](code-graph.md#the-go-precision-layer-opt-in-ty
 | Entry | `entry` | string | symbol to trace from: a function name, `file::name`, or a QName substring |
 | Depth | `depth` | int (opt) | max call depth (default 4) |
 | Format | `format` | string (opt) | `mermaid` to also return the trace as a `sequenceDiagram` |
-| Precise | `precise` | bool (opt) | for Go modules, enrich with type-checked edges (resolves interface dispatch); slower, needs the `go` toolchain |
+| Precise | `precise` | bool (opt) | for Go modules, use type-checked edges; for Rust Cargo projects, use `rust-analyzer` when available; slower, needs language tooling |
 | Refresh | `refresh` | bool (opt) | re-index instead of using the cached graph |
 
 **Output:**
@@ -225,7 +228,7 @@ silent no-op. See [code-graph.md](code-graph.md#the-go-precision-layer-opt-in-ty
 |-------|------|------|-------------|
 | Root | `root` | string (opt) | repo root |
 | Symbol | `symbol` | string | symbol whose blast radius to compute |
-| Precise | `precise` | bool (opt) | for Go modules, enrich with type-checked edges so the blast radius includes dynamically-dispatched callers; slower, needs the `go` toolchain |
+| Precise | `precise` | bool (opt) | for Go modules, use type-checked edges; for Rust Cargo projects, use `rust-analyzer` when available; slower, needs language tooling |
 | Refresh | `refresh` | bool (opt) | re-index instead of using the cached graph |
 
 **Output:**
@@ -239,7 +242,7 @@ silent no-op. See [code-graph.md](code-graph.md#the-go-precision-layer-opt-in-ty
 | AtRiskTests | `at_risk_tests` | `[]string` | the subset that are test-file symbols |
 | ImpactedCount | `impacted_count` | int | `len(transitive_callers)` |
 | Provider | `provider` | string | `builtin` or `null` |
-| Note | `note` | string | **always set** — the syntactic-edges caveat (or the type-checked upgrade when `precise` resolved Go edges), or a null-provider explanation |
+| Note | `note` | string | **always set** — the syntactic-edges caveat (or the semantic upgrade when `precise` resolved Go/Rust edges), or a null-provider explanation |
 
 ### `repo_map`
 *`internal/server/tools_repomap.go`* — Rank the codebase by call-graph centrality (PageRank), blended with git churn when available, and return a compact, token-budgeted map of the most important symbols — the heavily-relied-upon, actively-changing core. Load it first for orientation. Inspired by aider's repo map.
@@ -251,7 +254,7 @@ silent no-op. See [code-graph.md](code-graph.md#the-go-precision-layer-opt-in-ty
 | Focus | `focus` | `[]string` (opt) | symbols, repo-relative files, or QNames to bias the ranking toward (personalized PageRank) |
 | MaxTokens | `max_tokens` | int (opt) | approximate token budget for the rendered map (default 1000) |
 | ChurnWeight | `churn_weight` | float (opt) | how much git churn influences the ranking, 0..1 (default 0.3); 0 = pure centrality; ignored outside a git repo |
-| Precise | `precise` | bool (opt) | for Go modules, enrich with type-checked edges before ranking; slower, needs the `go` toolchain |
+| Precise | `precise` | bool (opt) | for Go modules, use type-checked edges; for Rust Cargo projects, use `rust-analyzer` when available; slower, needs language tooling |
 | Refresh | `refresh` | bool (opt) | re-index instead of using the cached graph |
 
 **Output:**
@@ -289,7 +292,7 @@ score collapses to pure centrality, so the ordering is identical to a non-git re
 | Seed | `seed` | string | what to gather context around: a symbol name, a repo-relative file path, or a `file::name` QName |
 | MaxTokens | `max_tokens` | int (opt) | approximate token budget for the bundled snippets (default 4000) |
 | MaxDistance | `max_distance` | int (opt) | call-graph hops out from the seed to gather (default 2) |
-| Precise | `precise` | bool (opt) | for Go modules, enrich with type-checked edges so the neighborhood follows real dispatch; slower, needs the `go` toolchain |
+| Precise | `precise` | bool (opt) | for Go modules, use type-checked edges; for Rust Cargo projects, use `rust-analyzer` when available; slower, needs language tooling |
 | Refresh | `refresh` | bool (opt) | re-index instead of using the cached graph |
 
 **Output:**
@@ -365,7 +368,7 @@ architecture-cartographer, which otherwise asks the model to guess these. See
 
 **Input:** `root` (opt); `format` (opt) — `mermaid` to also return a dependency flowchart.
 
-**Output:** `manifests` (`[]{manifest, ecosystem, module, direct: [{name, version, dev}], indirect}`), `total_direct`, `mermaid` (opt), `truncated`, `note`. Parses `go.mod` (via `x/mod/modfile`), `package.json`, `requirements.txt`, and `Cargo.toml` (focused readers, not full TOML); versions are the declared constraint, not the resolved lockfile version.
+**Output:** `manifests` (`[]{manifest, ecosystem, module, direct: [{name, version, kind, target, optional, dev}], indirect, targets}`), `total_direct`, `mermaid` (opt), `truncated`, `note`. Parses `go.mod` (via `x/mod/modfile`), `package.json`, `requirements.txt`, and `Cargo.toml`; Rust manifests are upgraded with `cargo metadata --no-deps` when Cargo is available. Versions are declared constraints, not resolved lockfile versions.
 
 ### `schema`
 *`internal/server/tools_schema.go`* — Database schema from SQL DDL.

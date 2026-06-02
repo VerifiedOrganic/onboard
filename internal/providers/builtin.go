@@ -146,11 +146,26 @@ func tagFile(rel, lang string, src []byte, tags []ts.Tag) ([]*Symbol, []rawRef) 
 		kind := strings.TrimPrefix(t.Kind, "definition.")
 		line := int(t.NameRange.StartPoint.Row) + 1
 		qn := uniqueQName(local, rel, t.Name, line)
-		sym := &Symbol{QName: qn, Name: t.Name, Kind: kind, File: rel, Line: line, Lang: lang}
+		sym := &Symbol{
+			QName:  qn,
+			Name:   t.Name,
+			Kind:   kind,
+			File:   rel,
+			Line:   line,
+			Column: int(t.NameRange.StartPoint.Column),
+			Lang:   lang,
+		}
 		if kind == "method" && lang == "go" {
 			// The @definition.method capture spans the whole declaration, so the bytes
 			// before the method name hold the receiver clause: "func (h *T) ".
 			sym.Recv = goReceiverType(src, t.Range.StartByte, t.NameRange.StartByte)
+		}
+		if lang == "rust" {
+			// Rust tree-sitter tags usually report associated functions as plain
+			// definitions; qualify anything inside an impl/trait scope so maps and traces
+			// distinguish Engine::new from free fn new.
+			sym.Recv = rustOwner(src, t.NameRange.StartByte)
+			sym.Test = rustDefinitionIsTest(src, t.Range.StartByte)
 		}
 		local[qn] = sym
 		defs = append(defs, sym)

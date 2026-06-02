@@ -80,6 +80,7 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 		g.ProvenEdges = map[string]bool{}
 	}
 	added := 0
+	proved := false
 	for _, e := range edges {
 		caller, ok := resolve(e.callerFile, e.callerLine, e.callerName)
 		if !ok {
@@ -93,6 +94,7 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 		if g.ProvenEdges[key] {
 			continue
 		}
+		proved = true
 		g.ProvenEdges[key] = true
 		// Was this edge already in the syntactic graph, or is it newly resolved?
 		isNew := true
@@ -108,8 +110,8 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 		g.Forward[caller] = appendUnique(g.Forward[caller], callee)
 		g.Reverse[callee] = appendUnique(g.Reverse[callee], caller)
 	}
-	if len(g.ProvenEdges) > 0 {
-		g.Precise = true
+	if proved {
+		g.MarkPrecision("go")
 	}
 	return added, nil
 }

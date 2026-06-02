@@ -39,7 +39,7 @@ type contextPackInput struct {
 	Seed        string `json:"seed" jsonschema:"what to gather context around: a symbol name, a repo-relative file path, or a file::name qualified name"`
 	MaxTokens   int    `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the bundled snippets (default 4000)"`
 	MaxDistance int    `json:"max_distance,omitempty" jsonschema:"how many call-graph hops out from the seed to gather (default 2)"`
-	Precise     bool   `json:"precise,omitempty" jsonschema:"for Go modules, enrich the graph with type-checked edges (resolves interface dispatch) so the neighborhood follows real dispatch; slower, requires the go toolchain"`
+	Precise     bool   `json:"precise,omitempty" jsonschema:"for Go modules, enrich with type-checked edges; for Rust Cargo projects, enrich with rust-analyzer call hierarchy when available; slower, requires the language toolchain"`
 	Refresh     bool   `json:"refresh,omitempty" jsonschema:"re-index the repo instead of using the cached graph"`
 }
 
@@ -179,7 +179,7 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 	case g.Provider == "null":
 		out.Note = "Definitions-only provider: no call graph, so the pack contains only the seed's own definitions (no neighbors). Snippets are heuristic windows bounded by the next definition."
 	case g.Precise:
-		out.Note = "Relevance = call-graph proximity to the seed, refined by centrality and git churn. Go call edges are type-checked (proven, incl. interface dispatch); snippets are heuristic windows bounded by the next definition, so a body may over- or under-shoot."
+		out.Note = "Relevance = call-graph proximity to the seed, refined by centrality and git churn. " + edgeCaveat(g) + " Snippets are heuristic windows bounded by the next definition, so a body may over- or under-shoot."
 	default:
 		out.Note = "Relevance = call-graph proximity to the seed, refined by centrality and git churn. Edges are syntactic (likely, not proven); snippets are heuristic windows bounded by the next definition, so a body may over- or under-shoot."
 	}

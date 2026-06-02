@@ -18,6 +18,7 @@ import (
 // reconHotspotCommits bounds the history recon scans for its quick hotspot summary; the
 // dedicated history tool exposes the full, configurable view.
 const reconHotspotCommits = 1000
+const maxReconRiskHints = 20
 
 type reconInput struct {
 	Root string `json:"root,omitempty" jsonschema:"absolute path to the repository root to analyze; defaults to the server's working directory"`
@@ -25,14 +26,16 @@ type reconInput struct {
 
 type reconOutput struct {
 	Root        string   `json:"root"`
-	Stack       []string `json:"stack"`              // ecosystems inferred from manifests
-	Manifests   []string `json:"manifests"`          // manifest files found (relative paths)
-	Frameworks  []string `json:"frameworks"`         // framework fingerprints
-	EntryPoints []string `json:"entry_points"`       // likely program entry points
-	TestLayout  []string `json:"test_layout"`        // directories that contain test files
-	Tooling     []string `json:"tooling"`            // docker, CI, linters, build tooling
-	DirTree     []string `json:"dir_tree"`           // top two directory levels, pruned
-	Hotspots    []string `json:"hotspots,omitempty"` // highest-churn files (git only); look here first
+	Stack       []string `json:"stack"`        // ecosystems inferred from manifests
+	Manifests   []string `json:"manifests"`    // manifest files found (relative paths)
+	Frameworks  []string `json:"frameworks"`   // framework fingerprints
+	EntryPoints []string `json:"entry_points"` // likely program entry points
+	TestLayout  []string `json:"test_layout"`  // directories that contain test files
+	Tooling     []string `json:"tooling"`      // docker, CI, linters, build tooling
+	RustTargets []string `json:"rust_targets,omitempty"`
+	RiskHints   []string `json:"risk_hints,omitempty"` // capped static hints for risky patterns
+	DirTree     []string `json:"dir_tree"`             // top two directory levels, pruned
+	Hotspots    []string `json:"hotspots,omitempty"`   // highest-churn files (git only); look here first
 	FileCount   int      `json:"file_count"`
 	Note        string   `json:"note,omitempty"`
 }
@@ -61,7 +64,7 @@ func registerReconTool(s *mcp.Server) {
 	}, recon)
 }
 
-func recon(_ context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.CallToolResult, reconOutput, error) {
+func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.CallToolResult, reconOutput, error) {
 	root, err := resolveRoot(in.Root)
 	if err != nil {
 		return nil, reconOutput{}, err
@@ -113,12 +116,23 @@ func recon(_ context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.CallT
 				out.EntryPoints = append(out.EntryPoints, rel)
 			}
 		}
+		if filepath.ToSlash(rel) == "src/lib.rs" {
+			out.EntryPoints = append(out.EntryPoints, rel)
+		}
 
 		if strings.HasSuffix(name, "_test.go") ||
 			strings.Contains(name, ".spec.") ||
 			strings.Contains(name, ".test.") ||
-			strings.HasPrefix(name, "test_") {
+			strings.HasPrefix(name, "test_") ||
+			isRustTestPath(rel) {
 			out.TestLayout = addUnique(out.TestLayout, filepath.Dir(rel))
+		}
+		if strings.HasSuffix(name, ".rs") {
+			hasTests, risks := scanRustFileSignals(p, rel, maxReconRiskHints-len(out.RiskHints))
+			if hasTests {
+				out.TestLayout = addUnique(out.TestLayout, filepath.Dir(rel))
+			}
+			out.RiskHints = append(out.RiskHints, risks...)
 		}
 
 		switch {
@@ -142,6 +156,21 @@ func recon(_ context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.CallT
 	if entries, e := os.ReadDir(filepath.Join(root, ".github", "workflows")); e == nil && len(entries) > 0 {
 		out.Tooling = addUnique(out.Tooling, "GitHub Actions")
 	}
+	if stackSet["Rust"] {
+		if cargo, ok := loadCargoMetadata(ctx, root); ok {
+			out.RustTargets = cargoTargetSummaries(root, cargo)
+			for _, md := range cargo {
+				for _, target := range md.Targets {
+					for _, kind := range target.Kind {
+						if kind == "bin" || kind == "lib" {
+							out.EntryPoints = append(out.EntryPoints, target.SrcPath)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
 
 	out.Stack = keys(stackSet)
 	out.Frameworks = keys(fwSet)
@@ -150,6 +179,9 @@ func recon(_ context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.CallT
 	sort.Strings(out.EntryPoints)
 	sort.Strings(out.TestLayout)
 	sort.Strings(out.Tooling)
+	sort.Strings(out.RustTargets)
+	sort.Strings(out.RiskHints)
+	out.EntryPoints = dedupeStrings(out.EntryPoints)
 
 	// Git churn hotspots: the files that change most are where understanding and risk
 	// concentrate, so point an onboarding reader at them first. Degrades silently outside
@@ -164,6 +196,22 @@ func recon(_ context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.CallT
 		out.Note = "No test files detected — the Phase-2 behavioral map will be thin; lean harder on Phase-4 end-to-end traces."
 	}
 	return nil, out, nil
+}
+
+func dedupeStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	sort.Strings(in)
+	out := in[:0]
+	var prev string
+	for i, v := range in {
+		if i == 0 || v != prev {
+			out = append(out, v)
+			prev = v
+		}
+	}
+	return out
 }
 
 // topHotspots formats the n highest-churn files (git.History is already sorted by churn)

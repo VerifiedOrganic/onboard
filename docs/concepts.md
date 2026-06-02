@@ -50,8 +50,11 @@ reflection, and interface calls can hide edges the syntactic pass can't see.
 
 For **Go**, you can upgrade. Pass `precise: true` and onboard runs a type-checked analysis
 (VTA over the SSA call graph) that resolves interface dispatch and marks those edges
-**proven**. It's opt-in because it builds your program — slower, but when an edge is
-load-bearing for a decision, you want the affidavit.
+**proven**. For **Rust Cargo projects**, the same flag uses `rust-analyzer` call hierarchy
+when the binary is available, enriching the graph while preserving the zero-setup
+tree-sitter fallback when it is not. These paths are opt-in because they ask language
+tooling to understand your project — slower, but useful when an edge is load-bearing for a
+decision.
 
 > Why not type-check everything, everywhere? Because that breaks [Idea 5](#idea-5--the-one-rule-that-explains-everything).
 > Honest-and-everywhere beats precise-but-only-sometimes for a tool whose job is first
@@ -65,7 +68,7 @@ because you have no way to catch it.
 
 So the rules are baked in:
 
-- Edges are labelled **likely** (syntactic) vs **proven** (type-checked).
+- Edges are labelled **likely** (syntactic) vs **proven/semantic** (precision-backed).
 - `dead_code` returns **leads, not verdicts** — and tells you what could be hiding a caller
   (reflection, framework registration, external importers) before you go deleting things.
 - "Could not determine the test runner" beats a confident wrong answer, every time.

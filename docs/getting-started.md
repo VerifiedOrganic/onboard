@@ -123,8 +123,10 @@ things like:
   likely it's truly dead.
 
 For Go repos, add *"use precise mode"* and the call graph gets upgraded from syntactic
-guesses to type-checked facts (it builds the program, so it's slower — worth it when an edge
-matters). The full menu is in [mcp-tools.md](mcp-tools.md).
+guesses to type-checked facts. For Rust Cargo repos, precise mode uses `rust-analyzer` call
+hierarchy when that binary is installed. It is slower because language tooling has to load
+the project, but worth it when an edge matters. The full menu is in
+[mcp-tools.md](mcp-tools.md).
 
 ## Running it headless
 
@@ -150,7 +152,7 @@ your terminal — the analysis lives behind the MCP tools.
 | `doctor` says `bin=false` | the config points at a binary that moved | re-run `install` to refresh the path |
 | `init` says "No agents detected" | none of the five are installed where expected | install an agent, or force one with `install --agent` |
 | `/onboard` isn't there | your client doesn't surface MCP prompts | ask in plain language; the tools still work |
-| The tour's edges look thin on a Go repo | syntactic graph missed interface/method calls | re-run the relevant tool with **precise mode** |
+| The tour's edges look thin on a Go or Rust repo | syntactic graph missed dispatch/method calls | re-run the relevant tool with **precise mode** (`go` or `rust-analyzer` must be installed) |
 
 ## Where next
 

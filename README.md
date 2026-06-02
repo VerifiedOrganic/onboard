@@ -70,8 +70,9 @@ Two halves of one idea — *how* to teach a codebase, and *the facts* to teach f
 The tools are backed by a **pure-Go tree-sitter code graph** covering ~200 languages with
 no CGo. Its call edges are *syntactic* — resolved by name and lexical scope, not
 type-checked. Translation: treat an edge as a very strong rumour, not a sworn affidavit.
-For Go, `precise: true` promotes the rumour to a fact (type-checked, interface dispatch and
-all).
+For Go, `precise: true` promotes the rumour to a type-checked fact. For Rust Cargo
+projects, `precise: true` can enrich the graph through `rust-analyzer` call hierarchy when
+that binary is installed; otherwise Rust stays on the zero-setup syntactic fallback.
 
 ## The one rule that explains everything
 
@@ -99,7 +100,7 @@ The docs are arranged by what you're trying to do, not by what's easiest to writ
 Built and tested: the embedded skills, the per-agent installer and `doctor`, the
 code-graph engine (`recon`, `trace_flow`, `impact`, `repo_map`, `context_pack`,
 `dead_code`, `explain_diff`, `render_map`), the guide cache, stdio **and** Streamable HTTP
-transports, and the optional Go type-checked precision layer. CI runs test + vet +
+transports, and the optional Go/Rust semantic precision layers. CI runs test + vet +
 golangci-lint + a cross-build matrix; releases ship via GoReleaser.
 
 Requires Go 1.25 or newer to build. Author: recursive.
