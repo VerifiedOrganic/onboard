@@ -1,0 +1,26 @@
+version: "2"
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - misspell
+    - revive
+    - bodyclose
+    - gosec
+    - unconvert
+    - copyloopvar
+  settings:
+    gosec:
+      excludes:
+        - G104 # duplicate of errcheck's unhandled-error reports
+        - G304 # file paths come from user/agent config by design (the installer writes them)
+        - G306 # 0644 perms on generated config/skill files are intentional
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/VerifiedOrganic/onboard

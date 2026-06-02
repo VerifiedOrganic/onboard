@@ -1,0 +1,12 @@
+# build output
+/onboard
+/dist/
+
+# installer backups (created when a config can't be parsed)
+*.onboard-bak
+
+# OS / editor cruft
+.DS_Store
+
+# agent-orchestration runtime state (agora/conduit plugin local DB + indexes)
+.agora/
