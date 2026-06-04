@@ -5,6 +5,30 @@ import (
 	"unicode"
 )
 
+// rustTagsQuery is an explicit tree-sitter tags query for Rust. The generic inferred query
+// misses method calls via field_expression (self.foo(), obj.bar()) because it only matches
+// field_identifier as a direct child of call_expression, but Rust nests it inside
+// field_expression. This query also captures modules, macros, constants, and type aliases.
+const rustTagsQuery = `
+; Definitions
+(function_item (identifier) @name) @definition.function
+(function_signature_item (identifier) @name) @definition.function
+(struct_item (type_identifier) @name) @definition.type
+(enum_item (type_identifier) @name) @definition.type
+(trait_item (type_identifier) @name) @definition.type
+(type_item (type_identifier) @name) @definition.type
+(mod_item (identifier) @name) @definition.module
+(macro_definition (identifier) @name) @definition.macro
+(const_item (identifier) @name) @definition.constant
+(static_item (identifier) @name) @definition.variable
+
+; Call references — direct, method, scoped, and macro calls.
+(call_expression (identifier) @name) @reference.call
+(call_expression (field_expression (field_identifier) @name)) @reference.call
+(call_expression (scoped_identifier (identifier) @name)) @reference.call
+(macro_invocation (identifier) @name) @reference.call
+`
+
 // rustOwner returns the nearest enclosing impl/trait owner at nameStart, if any. It is a
 // lightweight source scan layered on top of tree-sitter tags: the tagger already identified
 // the definition, but Rust's tags do not consistently attach the impl/trait container. This

@@ -321,6 +321,13 @@ func safeTag(tg *ts.Tagger, src []byte) (tags []ts.Tag) {
 	return tg.Tag(src)
 }
 
+// langTagsOverrides maps language names to explicit tags queries that replace the
+// generic inferred query. Use this when a language's inferred query misses important
+// patterns (e.g. Rust method calls via field_expression).
+var langTagsOverrides = map[string]string{
+	"rust": rustTagsQuery,
+}
+
 // buildTagger constructs a Tagger for a language, or nil if it has no tags query
 // or fails to load. Failures are swallowed so one bad grammar can't abort indexing.
 func buildTagger(entry *grammars.LangEntry) (tg *ts.Tagger) {
@@ -332,6 +339,11 @@ func buildTagger(entry *grammars.LangEntry) (tg *ts.Tagger) {
 	lang := entry.Language()
 	if lang == nil {
 		return nil
+	}
+	if q, ok := langTagsOverrides[entry.Name]; ok {
+		if t, err := ts.NewTagger(lang, q); err == nil {
+			return t
+		}
 	}
 	tagsQuery := grammars.ResolveTagsQuery(*entry)
 	if strings.TrimSpace(tagsQuery) == "" {

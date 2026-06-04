@@ -10,7 +10,7 @@ import (
 
 // cacheVersion is bumped whenever the on-disk format or the tagging/resolution logic
 // changes in a way that would make a stored index stale. A mismatch forces a rebuild.
-const cacheVersion = 2
+const cacheVersion = 3
 
 // diskRef/diskFile/diskIndex are the persisted form of the per-file tag data. The types
 // are unexported (not API surface); encoding/json serializes their exported fields.

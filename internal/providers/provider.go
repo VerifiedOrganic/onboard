@@ -139,16 +139,22 @@ func (g *Graph) Impact(qname string) []string {
 	return sortedKeys(seen)
 }
 
-// FindSymbols returns definitions matching query by exact name, exact QName, or
-// QName substring (in that order of preference, de-duplicated).
+// FindSymbols returns definitions matching query by exact name, exact QName, exact
+// Display name (receiver-qualified, e.g. "Engine::new"), or QName/Display substring
+// (in that order of preference, de-duplicated).
 func (g *Graph) FindSymbols(query string) []*Symbol {
 	var exact, sub []*Symbol
+	seen := map[string]bool{}
 	for _, s := range g.Defs {
 		switch {
-		case s.Name == query || s.QName == query:
+		case s.Name == query || s.QName == query || s.Display() == query:
 			exact = append(exact, s)
-		case strings.Contains(s.QName, query):
-			sub = append(sub, s)
+			seen[s.QName] = true
+		case strings.Contains(s.QName, query) || (s.Recv != "" && strings.Contains(s.Display(), query)):
+			if !seen[s.QName] {
+				sub = append(sub, s)
+				seen[s.QName] = true
+			}
 		}
 	}
 	out := append(exact, sub...)
