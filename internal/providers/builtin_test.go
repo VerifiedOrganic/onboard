@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +19,14 @@ func write(t *testing.T, root, rel, content string) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func mustUint32Offset(t *testing.T, label string, offset int) uint32 {
+	t.Helper()
+	if offset < 0 || offset > math.MaxUint32 {
+		t.Fatalf("%s offset not found", label)
+	}
+	return uint32(offset)
 }
 
 // qnameOf returns the single QName whose Name == name, failing if not exactly one.
@@ -183,9 +192,10 @@ func TestRustOwnerHelpers(t *testing.T) {
 		"    #[test]\n" +
 		"    fn parse(&self) {}\n" +
 		"}\n")
-	newStart := uint32(strings.Index(string(src), "new"))
-	parseDecl := uint32(strings.LastIndex(string(src), "fn parse"))
-	parseStart := uint32(strings.LastIndex(string(src), "parse"))
+	text := string(src)
+	newStart := mustUint32Offset(t, "new", strings.Index(text, "new"))
+	parseDecl := mustUint32Offset(t, "fn parse", strings.LastIndex(text, "fn parse"))
+	parseStart := mustUint32Offset(t, "parse", strings.LastIndex(text, "parse"))
 
 	if got := rustOwner(src, newStart); got != "Engine" {
 		t.Errorf("owner(new) = %q, want Engine", got)

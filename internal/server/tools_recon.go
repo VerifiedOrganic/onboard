@@ -158,7 +158,7 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 	}
 	if stackSet["Rust"] {
 		if cargo, ok := loadCargoMetadata(ctx, root); ok {
-			out.RustTargets = cargoTargetSummaries(root, cargo)
+			out.RustTargets = cargoTargetSummaries(cargo)
 			for _, md := range cargo {
 				for _, target := range md.Targets {
 					for _, kind := range target.Kind {

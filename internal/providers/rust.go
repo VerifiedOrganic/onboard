@@ -107,7 +107,7 @@ func rustBoundary(s string, i int) bool {
 		return true
 	}
 	r := rune(s[i])
-	return !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_')
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_'
 }
 
 func rustScopeOpenAt(s string) bool {
@@ -203,7 +203,7 @@ func rustTypeName(s string) string {
 	s = strings.TrimSpace(s)
 	best := ""
 	for _, part := range strings.FieldsFunc(s, func(r rune) bool {
-		return !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == ':')
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != ':'
 	}) {
 		part = strings.Trim(part, ":")
 		if part == "" || rustKeyword(part) {

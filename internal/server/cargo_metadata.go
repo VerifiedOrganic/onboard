@@ -121,7 +121,7 @@ func canonicalPath(path string) string {
 	return filepath.Clean(abs)
 }
 
-func cargoTargetSummaries(root string, metadata map[string]manifestDeps) []string {
+func cargoTargetSummaries(metadata map[string]manifestDeps) []string {
 	var out []string
 	for _, md := range metadata {
 		for _, target := range md.Targets {
