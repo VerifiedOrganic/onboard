@@ -10,7 +10,17 @@ import (
 
 // cacheVersion is bumped whenever the on-disk format or the tagging/resolution logic
 // changes in a way that would make a stored index stale. A mismatch forces a rebuild.
-const cacheVersion = 4
+const cacheVersion = 5
+
+type resolvedImport struct {
+	targetFile string
+	targetName string
+}
+
+type diskImport struct {
+	TargetFile string `json:"tf"`
+	TargetName string `json:"tn"`
+}
 
 // diskRef/diskFile/diskIndex are the persisted form of the per-file tag data. The types
 // are unexported (not API surface); encoding/json serializes their exported fields.
@@ -23,10 +33,11 @@ type diskRef struct {
 }
 
 type diskFile struct {
-	Hash string    `json:"h"`
-	Lang string    `json:"l"`
-	Defs []*Symbol `json:"d"`
-	Refs []diskRef `json:"r"`
+	Hash    string                `json:"h"`
+	Lang    string                `json:"l"`
+	Defs    []*Symbol             `json:"d"`
+	Refs    []diskRef             `json:"r"`
+	Imports map[string]diskImport `json:"i,omitempty"`
 }
 
 type diskIndex struct {
@@ -36,9 +47,10 @@ type diskIndex struct {
 
 // fileData is the in-memory per-file tag result (from a fresh tag or the cache).
 type fileData struct {
-	lang string
-	defs []*Symbol
-	refs []rawRef
+	lang    string
+	defs    []*Symbol
+	refs    []rawRef
+	imports map[string]resolvedImport
 }
 
 // hashBytes is a fast non-cryptographic content fingerprint; collisions are
@@ -78,6 +90,34 @@ func fromDiskRefs(refs []diskRef) []rawRef {
 			calleeName:  r.Callee,
 			calleeRecv:  r.Recv,
 			allowBare:   r.Bare,
+		}
+	}
+	return out
+}
+
+func toDiskImports(imports map[string]resolvedImport) map[string]diskImport {
+	if len(imports) == 0 {
+		return nil
+	}
+	out := make(map[string]diskImport, len(imports))
+	for k, v := range imports {
+		out[k] = diskImport{
+			TargetFile: v.targetFile,
+			TargetName: v.targetName,
+		}
+	}
+	return out
+}
+
+func fromDiskImports(imports map[string]diskImport) map[string]resolvedImport {
+	if len(imports) == 0 {
+		return nil
+	}
+	out := make(map[string]resolvedImport, len(imports))
+	for k, v := range imports {
+		out[k] = resolvedImport{
+			targetFile: v.TargetFile,
+			targetName: v.TargetName,
 		}
 	}
 	return out

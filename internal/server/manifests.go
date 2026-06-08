@@ -30,7 +30,7 @@ func parseManifest(root, path, name string) (manifestDeps, bool) {
 	case "go.mod":
 		return parseGoMod(rel, data)
 	case "package.json":
-		return parsePackageJSON(rel, data)
+		return parsePackageJSON(root, rel, data)
 	case "requirements.txt":
 		return parseRequirements(rel, data)
 	case "Cargo.toml":
@@ -59,24 +59,162 @@ func parseGoMod(rel string, data []byte) (manifestDeps, bool) {
 	return md, true
 }
 
-func parsePackageJSON(rel string, data []byte) (manifestDeps, bool) {
-	var pkg struct {
-		Name            string            `json:"name"`
-		Dependencies    map[string]string `json:"dependencies"`
-		DevDependencies map[string]string `json:"devDependencies"`
-	}
-	if err := json.Unmarshal(data, &pkg); err != nil {
+type rawPackageJSON struct {
+	Name                 string            `json:"name"`
+	PackageManager       string            `json:"packageManager"`
+	Dependencies         map[string]string `json:"dependencies"`
+	DevDependencies      map[string]string `json:"devDependencies"`
+	PeerDependencies     map[string]string `json:"peerDependencies"`
+	OptionalDependencies map[string]string `json:"optionalDependencies"`
+	Workspaces           json.RawMessage   `json:"workspaces"`
+	Scripts              map[string]string `json:"scripts"`
+	Engines              map[string]string `json:"engines"`
+}
+
+func parsePackageJSON(root, rel string, data []byte) (manifestDeps, bool) {
+	var raw rawPackageJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return manifestDeps{}, false
 	}
-	md := manifestDeps{Manifest: rel, Ecosystem: "JavaScript/TypeScript (npm)", Module: pkg.Name}
-	for name, ver := range pkg.Dependencies {
-		md.Direct = append(md.Direct, dependency{Name: name, Version: ver})
+	md := manifestDeps{
+		Manifest:       rel,
+		Ecosystem:      "JavaScript/TypeScript (npm)",
+		Module:         raw.Name,
+		PackageManager: raw.PackageManager,
+		Scripts:        raw.Scripts,
+		Engines:        raw.Engines,
 	}
-	for name, ver := range pkg.DevDependencies {
-		md.Direct = append(md.Direct, dependency{Name: name, Version: ver, Dev: true})
+
+	var workspaces []string
+	if len(raw.Workspaces) > 0 {
+		var arr []string
+		if err := json.Unmarshal(raw.Workspaces, &arr); err == nil {
+			workspaces = arr
+		} else {
+			var obj struct {
+				Packages []string `json:"packages"`
+			}
+			if err := json.Unmarshal(raw.Workspaces, &obj); err == nil {
+				workspaces = obj.Packages
+			}
+		}
+	}
+	md.Workspaces = workspaces
+
+	// Detect tools
+	md.DetectedTools = detectWorkspacesAndTools(root, rel, raw, workspaces)
+
+	for name, ver := range raw.Dependencies {
+		md.Direct = append(md.Direct, dependency{Name: name, Version: ver, Kind: "normal"})
+	}
+	for name, ver := range raw.DevDependencies {
+		md.Direct = append(md.Direct, dependency{Name: name, Version: ver, Dev: true, Kind: "dev"})
+	}
+	for name, ver := range raw.PeerDependencies {
+		md.Direct = append(md.Direct, dependency{Name: name, Version: ver, Kind: "peer"})
+	}
+	for name, ver := range raw.OptionalDependencies {
+		md.Direct = append(md.Direct, dependency{Name: name, Version: ver, Optional: true, Kind: "optional"})
 	}
 	sortDeps(md.Direct)
 	return md, true
+}
+
+func detectWorkspacesAndTools(root, rel string, raw rawPackageJSON, workspaces []string) []string {
+	var tools []string
+	dir := filepath.Dir(filepath.Join(root, rel))
+
+	hasFile := func(name string) bool {
+		_, err := os.Stat(filepath.Join(dir, name))
+		return err == nil
+	}
+
+	// Workspaces detection
+	isRoot := rel == "package.json"
+	if isRoot {
+		if hasFile("pnpm-workspace.yaml") || strings.HasPrefix(raw.PackageManager, "pnpm") {
+			tools = append(tools, "pnpm workspaces")
+		} else if len(workspaces) > 0 {
+			if strings.HasPrefix(raw.PackageManager, "yarn") {
+				tools = append(tools, "yarn workspaces")
+			} else {
+				tools = append(tools, "npm workspaces")
+			}
+		}
+	}
+
+	// Package dependency and file checks
+	checkDep := func(dep string) bool {
+		if _, ok := raw.Dependencies[dep]; ok {
+			return true
+		}
+		if _, ok := raw.DevDependencies[dep]; ok {
+			return true
+		}
+		if _, ok := raw.PeerDependencies[dep]; ok {
+			return true
+		}
+		return false
+	}
+
+	if checkDep("nx") || hasFile("nx.json") {
+		tools = append(tools, "Nx")
+	}
+	if checkDep("turbo") || hasFile("turbo.json") {
+		tools = append(tools, "Turbo")
+	}
+	if checkDep("vite") || hasFile("vite.config.ts") || hasFile("vite.config.js") || hasFile("vite.config.mts") {
+		tools = append(tools, "Vite")
+	}
+	if checkDep("next") || hasFile("next.config.js") || hasFile("next.config.mjs") {
+		tools = append(tools, "Next")
+	}
+	if checkDep("@sveltejs/kit") || hasFile("svelte.config.js") {
+		tools = append(tools, "SvelteKit")
+	}
+	if checkDep("@angular/core") || hasFile("angular.json") {
+		tools = append(tools, "Angular")
+	}
+	if checkDep("@angular/cli") {
+		tools = append(tools, "Angular CLI")
+	}
+	if checkDep("vitest") || hasFile("vitest.config.ts") || hasFile("vitest.config.js") {
+		tools = append(tools, "Vitest")
+	}
+	if checkDep("jest") || hasFile("jest.config.ts") || hasFile("jest.config.js") {
+		tools = append(tools, "Jest")
+	}
+	if checkDep("@playwright/test") || hasFile("playwright.config.ts") || hasFile("playwright.config.js") {
+		tools = append(tools, "Playwright")
+	}
+	if checkDep("cypress") || hasFile("cypress.config.ts") || hasFile("cypress.config.js") {
+		tools = append(tools, "Cypress")
+	}
+
+	hasStorybook := false
+	for dep := range raw.Dependencies {
+		if strings.HasPrefix(dep, "@storybook/") {
+			hasStorybook = true
+		}
+	}
+	for dep := range raw.DevDependencies {
+		if strings.HasPrefix(dep, "@storybook/") {
+			hasStorybook = true
+		}
+	}
+	if hasStorybook || hasFile(".storybook") {
+		tools = append(tools, "Storybook")
+	}
+
+	// Sort and deduplicate
+	sort.Strings(tools)
+	var out []string
+	for i, t := range tools {
+		if i == 0 || t != tools[i-1] {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func parseRequirements(rel string, data []byte) (manifestDeps, bool) {

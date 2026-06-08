@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -67,14 +68,24 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 			continue // only callables can be "uncalled"
 		}
 		out.Scanned++
-		if isTestSymbol(sym) || isEntryName(sym.Name) {
-			continue // toolchain/runtime-invoked: never dead
+		if isTestSymbol(sym) || isEntryName(sym.Name) || isFrameworkOrEntrySymbol(sym) {
+			continue // toolchain/runtime-invoked or framework entry point: never dead
 		}
 		if len(g.Callers(q)) > 0 {
 			continue
 		}
 		exported := symbolExported(sym)
 		conf, reason := orphanConfidence(symbolCallableKind(sym), exported, g.Precise)
+		if isReactComponent(sym) {
+			conf = "low"
+			reason = "React component or class — framework managed lifecycle"
+		} else if isAngularFile(sym.File) {
+			conf = "low"
+			reason = "Angular component/service method — may be called from HTML template or dependency injection"
+		} else if isPublicEntrypoint(sym.File) {
+			conf = "low"
+			reason = "Symbol in public entry point — likely part of package exports"
+		}
 		orphans = append(orphans, orphan{
 			QName: q, Symbol: sym.Display(), File: sym.File, Line: sym.Line,
 			Kind: sym.Kind, Exported: exported, Confidence: conf, Reason: reason,
@@ -105,6 +116,125 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 	out.Orphans = orphans
 	out.Note = deadCodeNote(g, in.Precise)
 	return out, nil
+}
+
+func isSvelteKitEntry(sym *providers.Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	base := filepath.Base(sym.File)
+	if strings.HasSuffix(sym.File, ".svelte") {
+		if strings.Contains(base, "+page") || strings.Contains(base, "+layout") {
+			return true
+		}
+	}
+	if strings.HasPrefix(base, "+page.") || strings.HasPrefix(base, "+layout.") || strings.HasPrefix(base, "+server.") {
+		name := sym.Name
+		if name == "load" || name == "actions" || name == "default" {
+			return true
+		}
+		switch name {
+		case "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD":
+			return true
+		}
+	}
+	return false
+}
+
+func isNextEntry(sym *providers.Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	base := filepath.Base(sym.File)
+	slashed := "/" + filepath.ToSlash(sym.File) + "/"
+	if strings.Contains(slashed, "/app/") || strings.Contains(slashed, "/pages/") {
+		name := sym.Name
+		if base == "page.tsx" || base == "page.ts" || base == "page.jsx" || base == "page.js" ||
+			base == "layout.tsx" || base == "layout.js" || base == "layout.jsx" || base == "layout.ts" ||
+			base == "error.tsx" || base == "loading.tsx" || base == "not-found.tsx" {
+			if name == "default" {
+				return true
+			}
+		}
+		if base == "route.ts" || base == "route.js" {
+			switch name {
+			case "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD":
+				return true
+			}
+		}
+		if strings.Contains(slashed, "/pages/") {
+			if name == "default" || name == "getServerSideProps" || name == "getStaticProps" || name == "getStaticPaths" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isAngularFile(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	return strings.Contains(base, ".component.") || strings.Contains(base, ".service.") || strings.Contains(base, ".module.") || strings.Contains(base, ".directive.") || strings.Contains(base, ".pipe.")
+}
+
+func isAngularLifecycleHook(name string) bool {
+	switch name {
+	case "ngOnInit", "ngOnChanges", "ngDoCheck", "ngAfterContentInit", "ngAfterContentChecked", "ngAfterViewInit", "ngAfterViewChecked", "ngOnDestroy":
+		return true
+	}
+	return false
+}
+
+func isStorybookFile(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	return strings.Contains(base, ".stories.") || strings.Contains(base, ".story.")
+}
+
+func isGeneratedFile(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	return strings.Contains(base, ".pb.go") ||
+		strings.Contains(base, ".gen.") ||
+		strings.Contains(base, "generated") ||
+		strings.HasPrefix(base, "mock_")
+}
+
+func isPublicEntrypoint(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	return base == "index.ts" || base == "index.js" || base == "index.tsx" || base == "index.jsx" || base == "lib.go"
+}
+
+func isReactComponent(sym *providers.Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	if sym.Lang != "javascript" && sym.Lang != "typescript" && sym.Lang != "tsx" && sym.Lang != "svelte" {
+		return false
+	}
+	if len(sym.Name) > 0 && unicode.IsUpper(rune(sym.Name[0])) {
+		return true
+	}
+	return false
+}
+
+func isFrameworkOrEntrySymbol(sym *providers.Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	if isSvelteKitEntry(sym) {
+		return true
+	}
+	if isNextEntry(sym) {
+		return true
+	}
+	if isAngularLifecycleHook(sym.Name) {
+		return true
+	}
+	if isStorybookFile(sym.File) {
+		return true
+	}
+	if isGeneratedFile(sym.File) {
+		return true
+	}
+	return false
 }
 
 // isEntryName matches names invoked by a runtime/toolchain rather than by an in-repo
@@ -178,7 +308,8 @@ func orphanConfidence(kind string, exported, precise bool) (confidence, reason s
 func deadCodeNote(g *providers.Graph, requestedPrecise bool) string {
 	base := "Leads, not verdicts: the syntactic graph cannot see calls via reflection, code generation, " +
 		"framework/DI registration, build-tagged files, or external importers — verify before deleting. " +
-		"Entry points (main/init) and test functions are already excluded."
+		"Entry points, framework-managed lifecycles (React, SvelteKit, Next.js, Angular, Storybook), " +
+		"generated files, and test functions are already excluded or marked low-confidence."
 	if requestedPrecise && !g.Precise {
 		return base + " " + semanticPrecisionUnavailableNote() + edgeCaveat(g)
 	}

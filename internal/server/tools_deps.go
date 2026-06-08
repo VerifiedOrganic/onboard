@@ -27,12 +27,13 @@ type depsInput struct {
 }
 
 type dependency struct {
-	Name     string `json:"name"`
-	Version  string `json:"version,omitempty"`
-	Kind     string `json:"kind,omitempty"`   // normal | dev | build, when the ecosystem exposes it
-	Target   string `json:"target,omitempty"` // target cfg for platform-specific deps
-	Optional bool   `json:"optional,omitempty"`
-	Dev      bool   `json:"dev,omitempty"` // development-only dependency
+	Name      string `json:"name"`
+	Version   string `json:"version,omitempty"`
+	Kind      string `json:"kind,omitempty"`   // normal | dev | build | peer | optional
+	Target    string `json:"target,omitempty"` // target cfg for platform-specific deps
+	Optional  bool   `json:"optional,omitempty"`
+	Dev       bool   `json:"dev,omitempty"`       // development-only dependency
+	Workspace bool   `json:"workspace,omitempty"` // true if it is a local workspace package
 }
 
 type rustTarget struct {
@@ -44,12 +45,18 @@ type rustTarget struct {
 }
 
 type manifestDeps struct {
-	Manifest  string       `json:"manifest"`  // repo-relative path
-	Ecosystem string       `json:"ecosystem"` // Go, JavaScript/TypeScript (npm), ...
-	Module    string       `json:"module,omitempty"`
-	Direct    []dependency `json:"direct"`
-	Indirect  int          `json:"indirect,omitempty"` // count of indirect deps (go.mod)
-	Targets   []rustTarget `json:"targets,omitempty"`  // Cargo targets, when Cargo metadata is available
+	Manifest              string            `json:"manifest"`  // repo-relative path
+	Ecosystem             string            `json:"ecosystem"` // Go, JavaScript/TypeScript (npm), ...
+	Module                string            `json:"module,omitempty"`
+	Direct                []dependency      `json:"direct"`
+	Indirect              int               `json:"indirect,omitempty"` // count of indirect deps (go.mod)
+	Targets               []rustTarget      `json:"targets,omitempty"`  // Cargo targets, when Cargo metadata is available
+	WorkspaceDependencies []string          `json:"workspace_dependencies,omitempty"`
+	PackageManager        string            `json:"package_manager,omitempty"`
+	Workspaces            []string          `json:"workspaces,omitempty"`
+	Scripts               map[string]string `json:"scripts,omitempty"`
+	Engines               map[string]string `json:"engines,omitempty"`
+	DetectedTools         []string          `json:"detected_tools,omitempty"`
 }
 
 type depsOutput struct {
@@ -94,6 +101,34 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 				out.Manifests[i] = md
 			}
 		}
+	}
+
+	// Build local workspace dependency graph
+	pkgToManifest := map[string]string{}
+	for _, m := range out.Manifests {
+		if m.Module != "" {
+			pkgToManifest[m.Module] = m.Manifest
+		}
+	}
+
+	for i := range out.Manifests {
+		m := &out.Manifests[i]
+		var workspaceDeps []string
+		for j := range m.Direct {
+			dep := &m.Direct[j]
+			if targetManifest, exists := pkgToManifest[dep.Name]; exists {
+				dep.Workspace = true
+				workspaceDeps = append(workspaceDeps, targetManifest)
+			}
+		}
+		sort.Strings(workspaceDeps)
+		var uniqueWorkspaceDeps []string
+		for k, w := range workspaceDeps {
+			if k == 0 || w != workspaceDeps[k-1] {
+				uniqueWorkspaceDeps = append(uniqueWorkspaceDeps, w)
+			}
+		}
+		m.WorkspaceDependencies = uniqueWorkspaceDeps
 	}
 
 	sort.Slice(out.Manifests, func(i, j int) bool { return out.Manifests[i].Manifest < out.Manifests[j].Manifest })

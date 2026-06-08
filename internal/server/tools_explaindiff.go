@@ -122,7 +122,7 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 			trans := g.Impact(sym.QName)
 			for _, q := range trans {
 				impactedUnion[q] = true
-				if ts := g.Defs[q]; isTestSymbol(ts) {
+				if isTestQName(q, g) {
 					atRiskTests[q] = true
 				}
 			}

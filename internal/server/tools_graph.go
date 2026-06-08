@@ -238,7 +238,7 @@ func impactAnalysis(ctx context.Context, in impactInput) (impactOutput, error) {
 	out.TransitiveCallers = g.Impact(matched)
 	out.ImpactedCount = len(out.TransitiveCallers)
 	for _, q := range out.TransitiveCallers {
-		if sym := g.Defs[q]; isTestSymbol(sym) {
+		if isTestQName(q, g) {
 			out.AtRiskTests = append(out.AtRiskTests, q)
 		}
 	}

@@ -347,6 +347,17 @@ The code states this in the package doc (`provider.go`), in `Builtin.Index`'s `N
 and in `impact`'s always-present `Note`. Present syntactic results as **likely, not
 proven** — but see the precision layer below, which upgrades specific edges to *proven*.
 
+### Known Limitations by Stack
+
+| Language/Stack | Reliable & Supported Today | Known Limitations (Heuristic/Syntactic Leads) |
+|---|---|---|
+| **Go** | Explicit method definitions, local calls, net/http, chi, gin, echo, gorilla routers (with nested prefix groups). Type-checked call graph (VTA) via `precise: true`. | Syntactic-only graph misses interface dispatches. Dynamic/runtime route registration across functions may result in approximate routes. |
+| **Rust** | Trait impls, struct/enum methods, inline unit tests. Complete compiler-based call hierarchy via `precise: true` (LSP/rust-analyzer). | Macros, meta-programming, and templated generics can obscure syntactic symbols. Rust precision requires `rust-analyzer` on the PATH. |
+| **JS/TS/JSX/TSX** | ES6 / CommonJS imports, default/named exports, aliases. Component usages like `<UserList />` resolved as call edges. `tsconfig`/`jsconfig` paths. | Dynamic imports (`import()`) or dynamic `require()` are not resolved. Dynamic member access (e.g. `obj[key]()`) cannot be resolved. |
+| **Svelte / SvelteKit** | Svelte `<script>` script blocks, template tag/expression refs, Kit file-convention routes (`+page.svelte`, `+server.ts`), and route handlers. | Complex reactive variables or store-based side-effects might not be modeled as call edges. |
+| **Angular** | Decorators (`@Component`, `@Injectable`), component templates (`(click)`, `{{...}}`), constructor DI class receivers, and router arrays. | Dynamic lazy-loaded routing configs without explicit string path literals are skipped. |
+| **Monorepos** | npm, yarn, pnpm workspaces detection, Nx/Turbo monorepo dependencies. Tool detection (Vite, Jest, Storybook, Playwright, Cypress). | Inter-package calls are mapped only if workspaces are declared and packages are imported using standard imports. |
+
 ### Precision layers (opt-in semantic)
 
 `precise: true` asks language tooling to enrich the universal syntactic graph. Each layer is

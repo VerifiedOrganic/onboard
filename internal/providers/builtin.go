@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	ts "github.com/odvcencio/gotreesitter"
 	"github.com/odvcencio/gotreesitter/grammars"
@@ -97,11 +98,44 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*Graph, error) {
 		// Reuse an unchanged file verbatim — skipping the expensive parse/tag step.
 		if prev != nil {
 			if pf, ok := prev.Files[rel]; ok && pf.Hash == h {
-				perFile[rel] = fileData{lang: pf.Lang, defs: pf.Defs, refs: fromDiskRefs(pf.Refs)}
+				perFile[rel] = fileData{
+					lang:    pf.Lang,
+					defs:    pf.Defs,
+					refs:    fromDiskRefs(pf.Refs),
+					imports: fromDiskImports(pf.Imports),
+				}
 				fresh.Files[rel] = pf
 				reused++
 				return nil
 			}
+		}
+
+		if entry.Name == "svelte" {
+			defs, refs := tagSvelteFile(rel, src, taggers)
+			imports := parseJSImports(root, rel, src)
+			perFile[rel] = fileData{lang: entry.Name, defs: defs, refs: refs, imports: imports}
+			fresh.Files[rel] = diskFile{
+				Hash:    h,
+				Lang:    entry.Name,
+				Defs:    defs,
+				Refs:    toDiskRefs(refs),
+				Imports: toDiskImports(imports),
+			}
+			retagged++
+			return nil
+		}
+
+		if entry.Name == "html" {
+			defs, refs := tagHTMLFile(rel, src)
+			perFile[rel] = fileData{lang: entry.Name, defs: defs, refs: refs}
+			fresh.Files[rel] = diskFile{
+				Hash: h,
+				Lang: entry.Name,
+				Defs: defs,
+				Refs: toDiskRefs(refs),
+			}
+			retagged++
+			return nil
 		}
 
 		tagger, known := taggers[entry.Name]
@@ -117,8 +151,18 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*Graph, error) {
 			return nil
 		}
 		defs, refs := tagFile(rel, entry.Name, src, tags)
-		perFile[rel] = fileData{lang: entry.Name, defs: defs, refs: refs}
-		fresh.Files[rel] = diskFile{Hash: h, Lang: entry.Name, Defs: defs, Refs: toDiskRefs(refs)}
+		var imports map[string]resolvedImport
+		if entry.Name == "javascript" || entry.Name == "typescript" || entry.Name == "tsx" {
+			imports = parseJSImports(root, rel, src)
+		}
+		perFile[rel] = fileData{lang: entry.Name, defs: defs, refs: refs, imports: imports}
+		fresh.Files[rel] = diskFile{
+			Hash:    h,
+			Lang:    entry.Name,
+			Defs:    defs,
+			Refs:    toDiskRefs(refs),
+			Imports: toDiskImports(imports),
+		}
 		retagged++
 		return nil
 	})
@@ -126,7 +170,7 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*Graph, error) {
 		return nil, walkErr
 	}
 
-	g := assembleGraph(perFile)
+	g := assembleGraph(perFile, root)
 	g.reused, g.retagged = reused, retagged
 	if cachePath != "" {
 		saveDiskIndex(cachePath, fresh)
@@ -163,6 +207,15 @@ func tagFile(rel, lang string, src []byte, tags []ts.Tag) ([]*Symbol, []rawRef) 
 			// before the method name hold the receiver clause: "func (h *T) ".
 			sym.Recv = goReceiverType(src, t.Range.StartByte, t.NameRange.StartByte)
 		}
+		if kind == "method" && (lang == "javascript" || lang == "typescript" || lang == "tsx" || lang == "svelte") {
+			if classQName := enclosing(fileDefs, t.Range.StartByte, t.Range.EndByte); classQName != "" {
+				if parentSym, ok := local[classQName]; ok && (parentSym.Kind == "class" || parentSym.Kind == "component") {
+					if idx := strings.LastIndex(classQName, "::"); idx >= 0 {
+						sym.Recv = classQName[idx+2:]
+					}
+				}
+			}
+		}
 		if lang == "rust" {
 			// Rust tree-sitter tags usually report associated functions as plain
 			// definitions; qualify anything inside an impl/trait scope so maps and traces
@@ -189,8 +242,11 @@ func tagFile(rel, lang string, src []byte, tags []ts.Tag) ([]*Symbol, []rawRef) 
 			caller = rel + "::(top-level)"
 		}
 		ref := rawRef{callerQName: caller, callerFile: rel, calleeName: t.Name, allowBare: true}
-		if lang == "rust" {
+		switch lang {
+		case "rust":
 			ref.calleeRecv, ref.allowBare = rustRefHint(src, t.Range.StartByte, t.NameRange.StartByte, byQName[caller])
+		case "javascript", "typescript", "tsx", "svelte":
+			ref.calleeRecv, ref.allowBare = jsRefHint(src, t.Range.StartByte, t.NameRange.StartByte)
 		}
 		refs = append(refs, ref)
 	}
@@ -202,7 +258,7 @@ func tagFile(rel, lang string, src []byte, tags []ts.Tag) ([]*Symbol, []rawRef) 
 // one. Ambiguous names are left unresolved rather than guessed — guessing would
 // manufacture false edges. Resolution is order-independent, so the result is the same
 // whether files were freshly tagged or reused from cache.
-func assembleGraph(perFile map[string]fileData) *Graph {
+func assembleGraph(perFile map[string]fileData, _ string) *Graph {
 	g := &Graph{
 		Provider: "builtin",
 		Defs:     map[string]*Symbol{},
@@ -217,10 +273,14 @@ func assembleGraph(perFile map[string]fileData) *Graph {
 	defsByDirRecvName := map[string][]string{}
 	langSet := map[string]bool{}
 	var refs []rawRef
+	fileImports := make(map[string]map[string]resolvedImport)
 
-	for _, fd := range perFile {
+	for file, fd := range perFile {
 		langSet[fd.lang] = true
 		g.Files++
+		if len(fd.imports) > 0 {
+			fileImports[file] = fd.imports
+		}
 		for _, sym := range fd.defs {
 			g.Defs[sym.QName] = sym
 			defsByName[sym.Name] = append(defsByName[sym.Name], sym.QName)
@@ -236,7 +296,7 @@ func assembleGraph(perFile map[string]fileData) *Graph {
 	}
 
 	for _, r := range refs {
-		callee := r.lookup(defsByFileName, defsByDirName, defsByName, defsByFileRecvName, defsByDirRecvName, defsByRecvName)
+		callee := r.lookup(defsByFileName, defsByDirName, defsByName, defsByFileRecvName, defsByDirRecvName, defsByRecvName, fileImports)
 		if callee == "" || callee == r.callerQName {
 			if callee == "" {
 				g.Unresolved++
@@ -256,20 +316,68 @@ func assembleGraph(perFile map[string]fileData) *Graph {
 	return g
 }
 
-func (r rawRef) lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvName, byRecvName map[string][]string) string {
-	// Resolve at the narrowest scope where the name is unambiguous, widening only when a
-	// scope yields no single match. At every tier the rule is identical: resolve ONLY when
-	// exactly one candidate exists, so an ambiguous name is left unresolved rather than
-	// mis-attributed to whichever same-named symbol happened to be defined last.
-	//
-	//  1. Same file      — the tightest lexical scope.
-	//  2. Same directory  — the package scope. In Go a top-level name is unique per package,
-	//     so a name that collides across the repo is usually unique within its own directory;
-	//     this tier recovers the many method/function calls (Render, Name, Run, ...) that the
-	//     name-only global check would otherwise drop as ambiguous. The len==1 guard keeps it
-	//     honest: two same-named methods in one package stay unresolved, never guessed.
-	//  3. Whole repo      — a globally unique name.
+func (r rawRef) lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvName, byRecvName map[string][]string, fileImports map[string]map[string]resolvedImport) string {
+	// 1. Check template associated file resolution (Angular component template matching)
+	if strings.HasSuffix(r.callerFile, ".html") {
+		assoc := strings.TrimSuffix(r.callerFile, ".html") + ".ts"
+		if cands := byFileName[assoc+"\x00"+r.calleeName]; len(cands) == 1 {
+			return cands[0]
+		}
+	}
+
+	// 2. Resolve imports / aliases
+	if imports, ok := fileImports[r.callerFile]; ok {
+		if imp, ok := imports[r.calleeName]; ok {
+			if imp.targetName == "default" {
+				if cands := byFileName[imp.targetFile+"\x00default"]; len(cands) == 1 {
+					return cands[0]
+				}
+				if cands := byFileName[imp.targetFile+"\x00"+r.calleeName]; len(cands) == 1 {
+					return cands[0]
+				}
+				baseName := strings.TrimSuffix(filepath.Base(imp.targetFile), filepath.Ext(imp.targetFile))
+				if cands := byFileName[imp.targetFile+"\x00"+baseName]; len(cands) == 1 {
+					return cands[0]
+				}
+				var firstCand string
+				for k, v := range byFileName {
+					if strings.HasPrefix(k, imp.targetFile+"\x00") && len(v) == 1 {
+						firstCand = v[0]
+						break
+					}
+				}
+				if firstCand != "" {
+					return firstCand
+				}
+			} else if imp.targetName == "*" {
+				var firstCand string
+				for k, v := range byFileName {
+					if strings.HasPrefix(k, imp.targetFile+"\x00") && len(v) == 1 {
+						firstCand = v[0]
+						break
+					}
+				}
+				if firstCand != "" {
+					return firstCand
+				}
+			} else {
+				if cands := byFileName[imp.targetFile+"\x00"+imp.targetName]; len(cands) == 1 {
+					return cands[0]
+				}
+			}
+		}
+	}
+
+	// 3. Resolve receivers (method calls)
 	if r.calleeRecv != "" {
+		if imports, ok := fileImports[r.callerFile]; ok {
+			if imp, ok := imports[r.calleeRecv]; ok {
+				if cands := byFileName[imp.targetFile+"\x00"+r.calleeName]; len(cands) == 1 {
+					return cands[0]
+				}
+			}
+		}
+
 		if q := lookupRecv(r.callerFile, r.calleeRecv, r.calleeName, byFileRecvName, byDirRecvName, byRecvName); q != "" {
 			return q
 		}
@@ -279,6 +387,7 @@ func (r rawRef) lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvN
 			}
 		}
 	}
+
 	if !r.allowBare {
 		return ""
 	}
@@ -304,6 +413,21 @@ func lookupRecv(file, recv, name string, byFileRecvName, byDirRecvName, byRecvNa
 	if cands := byRecvName[recv+"\x00"+name]; len(cands) == 1 {
 		return cands[0]
 	}
+
+	// Case fallback for JS/TS: lowercase variable receiver -> uppercase class/receiver type
+	if len(recv) > 0 && unicode.IsLower(rune(recv[0])) {
+		capitalized := string(unicode.ToUpper(rune(recv[0]))) + recv[1:]
+		if cands := byFileRecvName[file+"\x00"+capitalized+"\x00"+name]; len(cands) == 1 {
+			return cands[0]
+		}
+		if cands := byDirRecvName[dirOf(file)+"\x00"+capitalized+"\x00"+name]; len(cands) == 1 {
+			return cands[0]
+		}
+		if cands := byRecvName[capitalized+"\x00"+name]; len(cands) == 1 {
+			return cands[0]
+		}
+	}
+
 	return ""
 }
 
@@ -371,7 +495,10 @@ func safeTag(tg *ts.Tagger, src []byte) (tags []ts.Tag) {
 // generic inferred query. Use this when a language's inferred query misses important
 // patterns (e.g. Rust method calls via field_expression).
 var langTagsOverrides = map[string]string{
-	"rust": rustTagsQuery,
+	"rust":       rustTagsQuery,
+	"javascript": jsTagsQuery,
+	"typescript": tsTagsQuery,
+	"tsx":        tsxTagsQuery,
 }
 
 // buildTagger constructs a Tagger for a language, or nil if it has no tags query

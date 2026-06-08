@@ -39,10 +39,13 @@ var routeExts = map[string]bool{
 }
 
 type route struct {
-	Method string `json:"method"` // GET/POST/...; ANY when the pattern does not pin one
-	Path   string `json:"path"`
-	File   string `json:"file"`
-	Line   int    `json:"line"`
+	Method     string `json:"method"` // GET/POST/...; ANY when the pattern does not pin one
+	Path       string `json:"path"`
+	File       string `json:"file"`
+	Line       int    `json:"line"`
+	Source     string `json:"source"`
+	Pattern    string `json:"pattern"`
+	Confidence string `json:"confidence"`
 }
 
 type routesInput struct {
@@ -65,14 +68,22 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 
 	seen := map[string]bool{}
 	files := 0
-	add := func(method, path, file string, line int) {
+	add := func(method, path, file string, line int, source, pattern, confidence string) {
 		method = strings.ToUpper(method)
 		key := method + " " + path + " " + file
 		if seen[key] {
 			return
 		}
 		seen[key] = true
-		out.Routes = append(out.Routes, route{Method: method, Path: path, File: file, Line: line})
+		out.Routes = append(out.Routes, route{
+			Method:     method,
+			Path:       path,
+			File:       file,
+			Line:       line,
+			Source:     source,
+			Pattern:    pattern,
+			Confidence: confidence,
+		})
 	}
 
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, werr error) error {
@@ -85,6 +96,80 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 			}
 			return nil
 		}
+		rel, _ := filepath.Rel(root, p)
+		relSlash := filepath.ToSlash(rel)
+		lowerRel := strings.ToLower(relSlash)
+
+		// 1. SvelteKit file-convention
+		if strings.Contains(lowerRel, "/routes/") && (strings.HasSuffix(lowerRel, "+page.svelte") || strings.HasSuffix(lowerRel, "+server.ts") || strings.HasSuffix(lowerRel, "+server.js")) {
+			path := svelteKitRoutePath(relSlash)
+			if strings.HasSuffix(lowerRel, "+page.svelte") {
+				add("GET", path, relSlash, 1, "file-convention", "SvelteKit page", "high")
+			} else {
+				data, rerr := os.ReadFile(p)
+				if rerr == nil {
+					methods := scanServerMethods(string(data))
+					for _, m := range methods {
+						add(m, path, relSlash, 1, "file-convention", "SvelteKit server endpoint", "high")
+					}
+				}
+			}
+			return nil
+		}
+
+		// 2. Next.js App Router file-convention
+		if (strings.Contains(lowerRel, "/app/") || strings.HasPrefix(lowerRel, "app/")) &&
+			(strings.HasSuffix(lowerRel, "/page.tsx") || strings.HasSuffix(lowerRel, "/page.ts") || strings.HasSuffix(lowerRel, "/page.jsx") || strings.HasSuffix(lowerRel, "/page.js") ||
+				strings.HasSuffix(lowerRel, "/route.ts") || strings.HasSuffix(lowerRel, "/route.js")) {
+			path := nextAppRoutePath(relSlash)
+			if !strings.HasSuffix(lowerRel, "/route.ts") && !strings.HasSuffix(lowerRel, "/route.js") {
+				add("GET", path, relSlash, 1, "file-convention", "Next.js App Router Page", "high")
+			} else {
+				data, rerr := os.ReadFile(p)
+				if rerr == nil {
+					methods := scanServerMethods(string(data))
+					for _, m := range methods {
+						add(m, path, relSlash, 1, "file-convention", "Next.js App Router API", "high")
+					}
+				}
+			}
+			return nil
+		}
+
+		// 3. Next.js Pages Router file-convention
+		if (strings.Contains(lowerRel, "/pages/") || strings.HasPrefix(lowerRel, "pages/")) &&
+			!strings.Contains(lowerRel, "/_") &&
+			(strings.HasSuffix(lowerRel, ".tsx") || strings.HasSuffix(lowerRel, ".ts") || strings.HasSuffix(lowerRel, ".jsx") || strings.HasSuffix(lowerRel, ".js")) {
+			path := nextPagesRoutePath(relSlash)
+			pattern := "Next.js Pages Router Page"
+			method := "GET"
+			if strings.Contains(lowerRel, "/pages/api/") {
+				pattern = "Next.js Pages Router API"
+				method = "ANY"
+			}
+			add(method, path, relSlash, 1, "file-convention", pattern, "high")
+			return nil
+		}
+
+		// 4. Remix flat routes
+		if strings.Contains(lowerRel, "/routes/") &&
+			(strings.HasSuffix(lowerRel, ".tsx") || strings.HasSuffix(lowerRel, ".jsx") || strings.HasSuffix(lowerRel, ".ts") || strings.HasSuffix(lowerRel, ".js")) {
+			path := remixRoutePath(relSlash)
+			data, rerr := os.ReadFile(p)
+			if rerr == nil {
+				content := string(data)
+				hasLoader := strings.Contains(content, "export const loader") || strings.Contains(content, "export async function loader")
+				hasAction := strings.Contains(content, "export const action") || strings.Contains(content, "export async function action")
+				if hasLoader || (!hasLoader && !hasAction) {
+					add("GET", path, relSlash, 1, "file-convention", "Remix route module", "high")
+				}
+				if hasAction {
+					add("POST", path, relSlash, 1, "file-convention", "Remix route module", "high")
+				}
+			}
+			return nil
+		}
+
 		if !routeExts[strings.ToLower(filepath.Ext(d.Name()))] || isTestFile(p) {
 			return nil
 		}
@@ -96,8 +181,7 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 		if rerr != nil {
 			return nil
 		}
-		rel, _ := filepath.Rel(root, p)
-		scanRoutes(string(data), filepath.ToSlash(rel), add)
+		scanRoutes(string(data), relSlash, add)
 		return nil
 	})
 
@@ -116,23 +200,46 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 	out.Total = len(out.Routes)
 
 	if out.Total == 0 {
-		out.Note = "No HTTP routes matched the known framework patterns (chi/gin/echo/gorilla/net-http, Express, Flask, FastAPI)."
+		out.Note = "No HTTP routes matched the known framework patterns (Go chi/gin/echo/gorilla/net-http, SvelteKit, Next.js, Remix, Angular, Express, Flask, FastAPI)."
 		return out, nil
 	}
-	out.Note = "Routes matched from framework registration patterns — a recall-oriented heuristic, not a parser: bespoke routing may be missed and dynamic paths may be approximate. ANY = the pattern (e.g. net/http HandleFunc) does not pin a method."
+	out.Note = "Routes matched from file-conventions and registration patterns — a recall-oriented heuristic, not a parser: bespoke routing may be missed and dynamic paths may be approximate."
 	return out, nil
 }
 
-// scanRoutes runs every route pattern over one file's content, reporting each match's path,
-// method, and 1-based line via add.
-func scanRoutes(content, file string, add func(method, path, file string, line int)) {
+func scanRoutes(content, file string, add func(method, path, file string, line int, source, pattern, confidence string)) {
+	ext := strings.ToLower(filepath.Ext(file))
+	if ext == ".go" {
+		scanGoRoutes(content, file, add)
+		return
+	}
+
+	// Angular Router Config
+	angularRouteRe := regexp.MustCompile(`path:\s*['"]([^'"]*)['"]\s*,\s*(?:component|loadChildren|loadComponent)`)
+	for _, m := range angularRouteRe.FindAllStringSubmatchIndex(content, -1) {
+		path := content[m[2]:m[3]]
+		add("ANY", "/"+strings.TrimPrefix(path, "/"), file, lineAt(content, m[0]), "regex-heuristic", "Angular Router", "high")
+	}
+
+	// React Router
+	reactRouterRe := regexp.MustCompile(`\bpath\s*(?::|=)\s*['"]([^'"]+)['"]`)
+	for _, m := range reactRouterRe.FindAllStringSubmatchIndex(content, -1) {
+		path := content[m[2]:m[3]]
+		if looksLikePath(path) && !strings.Contains(content[m[0]:m[0]+30], "component") {
+			add("ANY", "/"+strings.TrimPrefix(path, "/"), file, lineAt(content, m[0]), "regex-heuristic", "React Router", "medium")
+		}
+	}
+
+	// Express/FastAPI-style
 	for _, m := range methodPathRe.FindAllStringSubmatchIndex(content, -1) {
 		method := content[m[2]:m[3]]
 		path := content[m[4]:m[5]]
 		if looksLikePath(path) {
-			add(method, path, file, lineAt(content, m[0]))
+			add(method, path, file, lineAt(content, m[0]), "regex-heuristic", "Express-style routing", "medium")
 		}
 	}
+
+	// Flask/Django
 	for _, m := range routeRe.FindAllStringSubmatchIndex(content, -1) {
 		path := content[m[2]:m[3]]
 		if !looksLikePath(path) {
@@ -142,22 +249,160 @@ func scanRoutes(content, file string, add func(method, path, file string, line i
 		rest := content[m[4]:m[5]]
 		if ml := methodsListRe.FindStringSubmatch(rest); ml != nil {
 			for _, meth := range splitMethods(ml[1]) {
-				add(meth, path, file, line)
+				add(meth, path, file, line, "regex-heuristic", "Flask/Python routing", "medium")
 			}
 		} else {
-			add("GET", path, file, line) // Flask .route default
+			add("GET", path, file, line, "regex-heuristic", "Flask/Python routing", "medium")
 		}
 	}
+
+	// HandleFunc / Handle
 	for _, m := range handleRe.FindAllStringSubmatchIndex(content, -1) {
 		path := content[m[2]:m[3]]
 		if looksLikePath(path) {
-			add("ANY", path, file, lineAt(content, m[0]))
+			add("ANY", path, file, lineAt(content, m[0]), "regex-heuristic", "Go standard HTTP multiplexer", "medium")
 		}
 	}
 }
 
-// looksLikePath filters out string literals that matched the call pattern but are clearly not
-// route paths (e.g. a `.get("timeout")` config key). A route path starts with "/" or ":".
+func scanGoRoutes(content, file string, add func(method, path, file string, line int, source, pattern, confidence string)) {
+	lines := strings.Split(content, "\n")
+	prefixes := make(map[string]string)
+	groupRe := regexp.MustCompile(`([\w$]+)\s*(?::?=|=)\s*([\w$]+)\.(?:Group|Route|PathPrefix|Subrouter)\(\s*["']([^"']+)`)
+	nonAssignGroupRe := regexp.MustCompile(`([\w$]+)\.(?:Group|Route|PathPrefix|Subrouter)\(\s*["']([^"']+)`)
+	methodRe := regexp.MustCompile(`(?i)([\w$]+)\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|HandleFunc|Handle)\(\s*["']([^"']+)`)
+
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "//") {
+			continue
+		}
+		if m := groupRe.FindStringSubmatch(line); m != nil {
+			child := m[1]
+			parent := m[2]
+			pathArg := m[3]
+			parentPrefix := prefixes[parent]
+			fullPrefix := parentPrefix + "/" + strings.TrimPrefix(pathArg, "/")
+			fullPrefix = strings.ReplaceAll(fullPrefix, "//", "/")
+			prefixes[child] = fullPrefix
+			continue
+		}
+		if m := nonAssignGroupRe.FindStringSubmatch(line); m != nil {
+			router := m[1]
+			pathArg := m[2]
+			prefix := prefixes[router]
+			fullPrefix := prefix + "/" + strings.TrimPrefix(pathArg, "/")
+			fullPrefix = strings.ReplaceAll(fullPrefix, "//", "/")
+			prefixes[router] = fullPrefix
+			continue
+		}
+		if m := methodRe.FindStringSubmatch(line); m != nil {
+			router := m[1]
+			method := m[2]
+			pathArg := m[3]
+			prefix := prefixes[router]
+			fullPath := prefix + "/" + strings.TrimPrefix(pathArg, "/")
+			fullPath = strings.ReplaceAll(fullPath, "//", "/")
+			lineNum := i + 1
+			meth := strings.ToUpper(method)
+			if meth == "HANDLEFUNC" || meth == "HANDLE" {
+				meth = "ANY"
+			}
+			add(meth, fullPath, file, lineNum, "regex-heuristic", "Go nested router group", "high")
+		}
+	}
+}
+
+func svelteKitRoutePath(relPath string) string {
+	idx := strings.Index(relPath, "routes/")
+	if idx < 0 {
+		return "/"
+	}
+	sub := relPath[idx+len("routes/"):]
+	sub = filepath.Dir(sub)
+	if sub == "." || sub == "" {
+		return "/"
+	}
+	parts := strings.Split(filepath.ToSlash(sub), "/")
+	var routeParts []string
+	for _, p := range parts {
+		if strings.HasPrefix(p, "(") && strings.HasSuffix(p, ")") {
+			continue
+		}
+		routeParts = append(routeParts, p)
+	}
+	return "/" + strings.Join(routeParts, "/")
+}
+
+func nextAppRoutePath(relPath string) string {
+	idx := strings.Index(relPath, "app/")
+	if idx < 0 {
+		return "/"
+	}
+	sub := relPath[idx+len("app/"):]
+	sub = filepath.Dir(sub)
+	if sub == "." || sub == "" {
+		return "/"
+	}
+	parts := strings.Split(filepath.ToSlash(sub), "/")
+	var routeParts []string
+	for _, p := range parts {
+		if strings.HasPrefix(p, "(") && strings.HasSuffix(p, ")") {
+			continue
+		}
+		routeParts = append(routeParts, p)
+	}
+	return "/" + strings.Join(routeParts, "/")
+}
+
+func nextPagesRoutePath(relPath string) string {
+	idx := strings.Index(relPath, "pages/")
+	if idx < 0 {
+		return "/"
+	}
+	sub := relPath[idx+len("pages/"):]
+	ext := filepath.Ext(sub)
+	sub = sub[:len(sub)-len(ext)]
+	sub = strings.TrimSuffix(sub, "/index")
+	if sub == "index" || sub == "" {
+		return "/"
+	}
+	return "/" + filepath.ToSlash(sub)
+}
+
+func remixRoutePath(relPath string) string {
+	idx := strings.Index(relPath, "routes/")
+	if idx < 0 {
+		return "/"
+	}
+	sub := relPath[idx+len("routes/"):]
+	ext := filepath.Ext(sub)
+	sub = sub[:len(sub)-len(ext)]
+	sub = strings.ReplaceAll(sub, ".", "/")
+	sub = strings.ReplaceAll(sub, "$", ":")
+	sub = strings.TrimSuffix(sub, "/_index")
+	if sub == "_index" || sub == "" {
+		return "/"
+	}
+	return "/" + filepath.ToSlash(sub)
+}
+
+func scanServerMethods(content string) []string {
+	var methods []string
+	known := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}
+	for _, m := range known {
+		if strings.Contains(content, "export const "+m) ||
+			strings.Contains(content, "export function "+m) ||
+			strings.Contains(content, "export async function "+m) {
+			methods = append(methods, m)
+		}
+	}
+	if len(methods) == 0 {
+		return []string{"ANY"}
+	}
+	return methods
+}
+
 func looksLikePath(s string) bool {
 	return strings.HasPrefix(s, "/") || strings.HasPrefix(s, ":")
 }
@@ -173,7 +418,6 @@ func splitMethods(s string) []string {
 	return out
 }
 
-// lineAt returns the 1-based line number of the byte offset idx in content.
 func lineAt(content string, idx int) int {
 	return 1 + strings.Count(content[:idx], "\n")
 }
