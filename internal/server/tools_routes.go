@@ -101,7 +101,7 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 		lowerRel := strings.ToLower(relSlash)
 
 		// 1. SvelteKit file-convention
-		if strings.Contains(lowerRel, "/routes/") && (strings.HasSuffix(lowerRel, "+page.svelte") || strings.HasSuffix(lowerRel, "+server.ts") || strings.HasSuffix(lowerRel, "+server.js")) {
+		if isRouteDirPath(lowerRel) && (strings.HasSuffix(lowerRel, "+page.svelte") || strings.HasSuffix(lowerRel, "+server.ts") || strings.HasSuffix(lowerRel, "+server.js")) {
 			path := svelteKitRoutePath(relSlash)
 			if strings.HasSuffix(lowerRel, "+page.svelte") {
 				add("GET", path, relSlash, 1, "file-convention", "SvelteKit page", "high")
@@ -152,7 +152,7 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 		}
 
 		// 4. Remix flat routes
-		if strings.Contains(lowerRel, "/routes/") &&
+		if isRouteDirPath(lowerRel) &&
 			(strings.HasSuffix(lowerRel, ".tsx") || strings.HasSuffix(lowerRel, ".jsx") || strings.HasSuffix(lowerRel, ".ts") || strings.HasSuffix(lowerRel, ".js")) {
 			path := remixRoutePath(relSlash)
 			data, rerr := os.ReadFile(p)
@@ -214,18 +214,17 @@ func scanRoutes(content, file string, add func(method, path, file string, line i
 		return
 	}
 
-	// Angular Router Config
-	angularRouteRe := regexp.MustCompile(`path:\s*['"]([^'"]*)['"]\s*,\s*(?:component|loadChildren|loadComponent)`)
-	for _, m := range angularRouteRe.FindAllStringSubmatchIndex(content, -1) {
-		path := content[m[2]:m[3]]
-		add("ANY", "/"+strings.TrimPrefix(path, "/"), file, lineAt(content, m[0]), "regex-heuristic", "Angular Router", "high")
-	}
+	scanAngularRoutes(content, file, add)
 
 	// React Router
 	reactRouterRe := regexp.MustCompile(`\bpath\s*(?::|=)\s*['"]([^'"]+)['"]`)
 	for _, m := range reactRouterRe.FindAllStringSubmatchIndex(content, -1) {
 		path := content[m[2]:m[3]]
-		if looksLikePath(path) && !strings.Contains(content[m[0]:m[0]+30], "component") {
+		end := m[0] + 30
+		if end > len(content) {
+			end = len(content)
+		}
+		if looksLikePath(path) && !strings.Contains(content[m[0]:end], "component") {
 			add("ANY", "/"+strings.TrimPrefix(path, "/"), file, lineAt(content, m[0]), "regex-heuristic", "React Router", "medium")
 		}
 	}
@@ -268,15 +267,23 @@ func scanRoutes(content, file string, add func(method, path, file string, line i
 func scanGoRoutes(content, file string, add func(method, path, file string, line int, source, pattern, confidence string)) {
 	lines := strings.Split(content, "\n")
 	prefixes := make(map[string]string)
+	type prefixScope struct {
+		router string
+		prev   string
+		depth  int
+	}
+	var scopes []prefixScope
+	braceDepth := 0
 	groupRe := regexp.MustCompile(`([\w$]+)\s*(?::?=|=)\s*([\w$]+)\.(?:Group|Route|PathPrefix|Subrouter)\(\s*["']([^"']+)`)
 	nonAssignGroupRe := regexp.MustCompile(`([\w$]+)\.(?:Group|Route|PathPrefix|Subrouter)\(\s*["']([^"']+)`)
 	methodRe := regexp.MustCompile(`(?i)([\w$]+)\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|HandleFunc|Handle)\(\s*["']([^"']+)`)
 
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
+	for i, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
 		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
+		assignedGroup := false
 		if m := groupRe.FindStringSubmatch(line); m != nil {
 			child := m[1]
 			parent := m[2]
@@ -285,30 +292,63 @@ func scanGoRoutes(content, file string, add func(method, path, file string, line
 			fullPrefix := parentPrefix + "/" + strings.TrimPrefix(pathArg, "/")
 			fullPrefix = strings.ReplaceAll(fullPrefix, "//", "/")
 			prefixes[child] = fullPrefix
-			continue
+			assignedGroup = true
 		}
-		if m := nonAssignGroupRe.FindStringSubmatch(line); m != nil {
-			router := m[1]
-			pathArg := m[2]
-			prefix := prefixes[router]
-			fullPrefix := prefix + "/" + strings.TrimPrefix(pathArg, "/")
-			fullPrefix = strings.ReplaceAll(fullPrefix, "//", "/")
-			prefixes[router] = fullPrefix
-			continue
+		if !assignedGroup {
+			if m := nonAssignGroupRe.FindStringSubmatch(line); m != nil {
+				router := m[1]
+				pathArg := m[2]
+				prefix := prefixes[router]
+				fullPrefix := prefix + "/" + strings.TrimPrefix(pathArg, "/")
+				fullPrefix = strings.ReplaceAll(fullPrefix, "//", "/")
+				scopeDepth := braceDepth + strings.Count(line, "{") - strings.Count(line, "}")
+				if scopeDepth <= braceDepth {
+					scopeDepth = braceDepth + 1
+				}
+				scopes = append(scopes, prefixScope{router: router, prev: prefixes[router], depth: scopeDepth})
+				prefixes[router] = fullPrefix
+			}
 		}
 		if m := methodRe.FindStringSubmatch(line); m != nil {
 			router := m[1]
 			method := m[2]
 			pathArg := m[3]
 			prefix := prefixes[router]
-			fullPath := prefix + "/" + strings.TrimPrefix(pathArg, "/")
-			fullPath = strings.ReplaceAll(fullPath, "//", "/")
+			fullPrefix := prefix + "/" + strings.TrimPrefix(pathArg, "/")
+			fullPrefix = strings.ReplaceAll(fullPrefix, "//", "/")
 			lineNum := i + 1
 			meth := strings.ToUpper(method)
 			if meth == "HANDLEFUNC" || meth == "HANDLE" {
 				meth = "ANY"
 			}
-			add(meth, fullPath, file, lineNum, "regex-heuristic", "Go nested router group", "high")
+			add(meth, fullPrefix, file, lineNum, "regex-heuristic", "Go nested router group", "high")
+		}
+
+		braceDepth += strings.Count(line, "{") - strings.Count(line, "}")
+		if braceDepth < 0 {
+			braceDepth = 0
+		}
+		for len(scopes) > 0 && braceDepth < scopes[len(scopes)-1].depth {
+			scope := scopes[len(scopes)-1]
+			scopes = scopes[:len(scopes)-1]
+			if scope.prev == "" {
+				delete(prefixes, scope.router)
+			} else {
+				prefixes[scope.router] = scope.prev
+			}
+		}
+	}
+}
+
+func scanAngularRoutes(content, file string, add func(method, path, file string, line int, source, pattern, confidence string)) {
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?s)\{[^{}]*\bpath\s*:\s*['"]([^'"]*)['"][^{}]*(?:\bcomponent\b|\bloadChildren\b|\bloadComponent\b)\s*:[^{}]*\}`),
+		regexp.MustCompile(`(?s)\{[^{}]*(?:\bcomponent\b|\bloadChildren\b|\bloadComponent\b)\s*:[^{}]*\bpath\s*:\s*['"]([^'"]*)['"][^{}]*\}`),
+	}
+	for _, re := range patterns {
+		for _, m := range re.FindAllStringSubmatchIndex(content, -1) {
+			path := content[m[2]:m[3]]
+			add("ANY", "/"+strings.TrimPrefix(path, "/"), file, lineAt(content, m[0]), "regex-heuristic", "Angular Router", "high")
 		}
 	}
 }
@@ -326,12 +366,42 @@ func svelteKitRoutePath(relPath string) string {
 	parts := strings.Split(filepath.ToSlash(sub), "/")
 	var routeParts []string
 	for _, p := range parts {
-		if strings.HasPrefix(p, "(") && strings.HasSuffix(p, ")") {
-			continue
+		if seg, ok := normalizeFileRouteSegment(p); ok {
+			routeParts = append(routeParts, seg)
 		}
-		routeParts = append(routeParts, p)
 	}
 	return "/" + strings.Join(routeParts, "/")
+}
+
+func isRouteDirPath(relPath string) bool {
+	return strings.HasPrefix(relPath, "routes/") || strings.Contains(relPath, "/routes/")
+}
+
+func normalizeFileRouteSegment(seg string) (string, bool) {
+	if seg == "" {
+		return "", false
+	}
+	if strings.HasPrefix(seg, "(") && strings.HasSuffix(seg, ")") {
+		return "", false
+	}
+	if strings.HasPrefix(seg, "@") || strings.HasPrefix(seg, "_") {
+		return "", false
+	}
+	if strings.HasPrefix(seg, "[") && strings.HasSuffix(seg, "]") {
+		param := strings.Trim(seg, "[]")
+		param = strings.TrimPrefix(param, "...")
+		if before, _, ok := strings.Cut(param, "="); ok {
+			param = before
+		}
+		if param == "" {
+			return "", false
+		}
+		if strings.Contains(seg, "...") {
+			return ":" + param + "*", true
+		}
+		return ":" + param, true
+	}
+	return seg, true
 }
 
 func nextAppRoutePath(relPath string) string {
@@ -347,10 +417,9 @@ func nextAppRoutePath(relPath string) string {
 	parts := strings.Split(filepath.ToSlash(sub), "/")
 	var routeParts []string
 	for _, p := range parts {
-		if strings.HasPrefix(p, "(") && strings.HasSuffix(p, ")") {
-			continue
+		if seg, ok := normalizeFileRouteSegment(p); ok {
+			routeParts = append(routeParts, seg)
 		}
-		routeParts = append(routeParts, p)
 	}
 	return "/" + strings.Join(routeParts, "/")
 }
@@ -367,7 +436,17 @@ func nextPagesRoutePath(relPath string) string {
 	if sub == "index" || sub == "" {
 		return "/"
 	}
-	return "/" + filepath.ToSlash(sub)
+	parts := strings.Split(filepath.ToSlash(sub), "/")
+	var routeParts []string
+	for _, p := range parts {
+		if seg, ok := normalizeFileRouteSegment(p); ok {
+			routeParts = append(routeParts, seg)
+		}
+	}
+	if len(routeParts) == 0 {
+		return "/"
+	}
+	return "/" + strings.Join(routeParts, "/")
 }
 
 func remixRoutePath(relPath string) string {

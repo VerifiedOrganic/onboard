@@ -328,7 +328,8 @@ func (r rawRef) lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvN
 	// 2. Resolve imports / aliases
 	if imports, ok := fileImports[r.callerFile]; ok {
 		if imp, ok := imports[r.calleeName]; ok {
-			if imp.targetName == "default" {
+			switch imp.targetName {
+			case "default":
 				if cands := byFileName[imp.targetFile+"\x00default"]; len(cands) == 1 {
 					return cands[0]
 				}
@@ -339,28 +340,12 @@ func (r rawRef) lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvN
 				if cands := byFileName[imp.targetFile+"\x00"+baseName]; len(cands) == 1 {
 					return cands[0]
 				}
-				var firstCand string
-				for k, v := range byFileName {
-					if strings.HasPrefix(k, imp.targetFile+"\x00") && len(v) == 1 {
-						firstCand = v[0]
-						break
-					}
+				if sole := soleDefinitionInFile(imp.targetFile, byFileName); sole != "" {
+					return sole
 				}
-				if firstCand != "" {
-					return firstCand
-				}
-			} else if imp.targetName == "*" {
-				var firstCand string
-				for k, v := range byFileName {
-					if strings.HasPrefix(k, imp.targetFile+"\x00") && len(v) == 1 {
-						firstCand = v[0]
-						break
-					}
-				}
-				if firstCand != "" {
-					return firstCand
-				}
-			} else {
+			case "*":
+				return ""
+			default:
 				if cands := byFileName[imp.targetFile+"\x00"+imp.targetName]; len(cands) == 1 {
 					return cands[0]
 				}
@@ -401,6 +386,25 @@ func (r rawRef) lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvN
 		return cands[0]
 	}
 	return "" // ambiguous or unknown
+}
+
+func soleDefinitionInFile(file string, byFileName map[string][]string) string {
+	prefix := file + "\x00"
+	var sole string
+	count := 0
+	for k, cands := range byFileName {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		for _, q := range cands {
+			count++
+			if count > 1 {
+				return ""
+			}
+			sole = q
+		}
+	}
+	return sole
 }
 
 func lookupRecv(file, recv, name string, byFileRecvName, byDirRecvName, byRecvName map[string][]string) string {

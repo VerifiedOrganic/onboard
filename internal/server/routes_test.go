@@ -85,6 +85,64 @@ func TestRoutesLineNumbers(t *testing.T) {
 	}
 }
 
+func TestGoRouteGroupPrefixDoesNotLeakPastClosure(t *testing.T) {
+	root := t.TempDir()
+	writeRouteFile(t, root, "routes.go", `package routes
+func setup(r chi.Router) {
+	r.Route("/api", func(r chi.Router) {
+		r.Get("/users", users)
+	})
+	r.Get("/health", health)
+}`)
+	out, err := routesExtract(context.Background(), routesInput{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRoute(out, "GET", "/api/users") {
+		t.Fatalf("missing grouped route; got %+v", out.Routes)
+	}
+	if !hasRoute(out, "GET", "/health") {
+		t.Fatalf("route after group should not keep /api prefix; got %+v", out.Routes)
+	}
+	if hasRoute(out, "GET", "/api/health") {
+		t.Fatalf("group prefix leaked past closure; got %+v", out.Routes)
+	}
+}
+
+func TestRoutesFrontendConventions(t *testing.T) {
+	root := t.TempDir()
+	writeRouteFile(t, root, "src/routes/[userId]/+server.ts", `
+export async function GET() {}
+export const POST = async () => {};
+`)
+	writeRouteFile(t, root, "app/blog/[slug]/page.tsx", `export default function Page() { return null }`)
+	writeRouteFile(t, root, "pages/users/[id].tsx", `export default function User() { return null }`)
+	writeRouteFile(t, root, "app/app.routes.ts", `
+const routes = [
+	{ component: UserComponent, path: 'users' },
+	{ path: 'admin', loadChildren: () => import('./admin') },
+];
+`)
+
+	out, err := routesExtract(context.Background(), routesInput{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct{ method, path string }{
+		{"GET", "/:userId"},
+		{"POST", "/:userId"},
+		{"GET", "/blog/:slug"},
+		{"GET", "/users/:id"},
+		{"ANY", "/users"},
+		{"ANY", "/admin"},
+	}
+	for _, w := range want {
+		if !hasRoute(out, w.method, w.path) {
+			t.Errorf("missing route %s %s; got %+v", w.method, w.path, out.Routes)
+		}
+	}
+}
+
 func TestRoutesEmptyRepo(t *testing.T) {
 	out, err := routesExtract(context.Background(), routesInput{Root: t.TempDir()})
 	if err != nil {

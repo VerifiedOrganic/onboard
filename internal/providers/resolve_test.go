@@ -63,6 +63,24 @@ func TestBuiltinCrossFileAmbiguityLeftUnresolved(t *testing.T) {
 	}
 }
 
+func TestBuiltinDefaultImportDoesNotGuessAmongMultipleExports(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "mod.js", "export function Alpha() {}\nexport function Beta() {}\n")
+	write(t, root, "app.js", "import Widget from './mod';\nexport function Use() { Widget(); }\n")
+
+	g, err := Builtin{}.Index(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	use := qnameOf(t, g, "Use")
+	for _, c := range g.Callees(use) {
+		if strings.HasPrefix(c, "mod.js::") {
+			t.Errorf("ambiguous default import should not guess a target export, got edge to %s", c)
+		}
+	}
+}
+
 // The unique-name case must still resolve (the fix must not over-suppress).
 func TestBuiltinUniqueNameStillResolves(t *testing.T) {
 	root := t.TempDir()
