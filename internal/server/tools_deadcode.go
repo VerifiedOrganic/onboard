@@ -222,17 +222,22 @@ func isRemixOrReactRouterEntry(sym *providers.Symbol) bool {
 	if sym.Lang != "javascript" && sym.Lang != "typescript" && sym.Lang != "tsx" {
 		return false
 	}
+	if !isRemixOrReactRouterRouteFile(sym.File) {
+		return false
+	}
 	name := sym.Name
 	if name == "loader" || name == "action" || name == "headers" || name == "meta" || name == "default" {
 		return true
 	}
-	slashed := "/" + filepath.ToSlash(sym.File)
-	if strings.Contains(slashed, "/routes/") {
-		if len(name) > 0 && unicode.IsUpper(rune(name[0])) {
-			return true
-		}
+	if len(name) > 0 && unicode.IsUpper(rune(name[0])) {
+		return true
 	}
 	return false
+}
+
+func isRemixOrReactRouterRouteFile(path string) bool {
+	slashed := "/" + filepath.ToSlash(path)
+	return strings.Contains(slashed, "/routes/")
 }
 
 func isFrameworkOrEntrySymbol(sym *providers.Symbol) bool {

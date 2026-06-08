@@ -136,13 +136,23 @@ export async function POST() { return null; }
 export async function loader() { return null; }
 export async function action() { return null; }
 `)
+	// Same lifecycle-ish name outside a route module should still be treated as
+	// ordinary code.
+	writeRepoFile(t, root, "src/utils/actions.ts", `
+export function action() { return null; }
+`)
 
 	out, err := deadCode(context.Background(), deadCodeInput{Root: root, Refresh: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	foundUtilityAction := false
 	for _, o := range out.Orphans {
+		if strings.Contains(o.File, "src/utils/actions.ts") && o.Symbol == "action" {
+			foundUtilityAction = true
+			continue
+		}
 		if strings.Contains(o.Symbol, "Page") ||
 			strings.Contains(o.Symbol, "GET") ||
 			strings.Contains(o.Symbol, "POST") ||
@@ -150,5 +160,8 @@ export async function action() { return null; }
 			strings.Contains(o.Symbol, "action") {
 			t.Errorf("framework-managed symbol %q was falsely reported as dead code", o.Symbol)
 		}
+	}
+	if !foundUtilityAction {
+		t.Errorf("non-route utility action should remain a dead-code lead; got %+v", out.Orphans)
 	}
 }
