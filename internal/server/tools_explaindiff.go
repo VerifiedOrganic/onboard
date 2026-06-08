@@ -158,6 +158,10 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 	out.ImpactedCount = len(impactedUnion)
 	out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol. Blast radius via the call graph: " +
 		edgeCaveat(g) + goPrecisionHint(g, in.Precise)
+	if in.Precise && !g.Precise {
+		out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol. Blast radius via the call graph: " +
+			semanticPrecisionUnavailableNote() + edgeCaveat(g)
+	}
 	return out, nil
 }
 

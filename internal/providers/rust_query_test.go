@@ -6,6 +6,17 @@ import (
 	"testing"
 )
 
+func qnameByDisplay(t *testing.T, g *Graph, display string) string {
+	t.Helper()
+	for _, s := range g.Defs {
+		if s.Display() == display {
+			return s.QName
+		}
+	}
+	t.Fatalf("no symbol with display %q (defs: %v)", display, defNames(g))
+	return ""
+}
+
 func TestRustMethodCallEdges(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "lib.rs", `
@@ -162,6 +173,92 @@ fn hello() {
 	greet := qnameOf(t, g, "greet")
 	if !slices.Contains(g.Callees(hello), greet) {
 		t.Errorf("hello should call greet!; callees=%v", g.Callees(hello))
+	}
+}
+
+func TestRustReceiverQualifiedDuplicateMethods(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "lib.rs", `
+pub struct Parser;
+pub struct Runner;
+
+impl Parser {
+    pub fn new() -> Self { Self }
+
+    pub fn run(&self, input: &str) -> usize {
+        self.parse(input)
+    }
+
+    fn parse(&self, input: &str) -> usize {
+        input.len()
+    }
+}
+
+impl Runner {
+    pub fn new() -> Self { Self }
+
+    pub fn run(&self) -> usize {
+        Parser::new().run("abc")
+    }
+}
+
+pub fn public_entry() -> usize {
+    Runner::new().run()
+}
+`)
+
+	g, err := Builtin{}.Index(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Files == 0 {
+		t.Skipf("rust grammar not available: %s", g.Note)
+	}
+
+	parserNew := qnameByDisplay(t, g, "Parser::new")
+	parserRun := qnameByDisplay(t, g, "Parser::run")
+	parserParse := qnameByDisplay(t, g, "Parser::parse")
+	runnerNew := qnameByDisplay(t, g, "Runner::new")
+	runnerRun := qnameByDisplay(t, g, "Runner::run")
+	publicEntry := qnameOf(t, g, "public_entry")
+
+	for _, want := range []string{runnerNew, runnerRun} {
+		if !slices.Contains(g.Callees(publicEntry), want) {
+			t.Errorf("public_entry should call %s; got %v", want, g.Callees(publicEntry))
+		}
+	}
+	for _, want := range []string{parserNew, parserRun} {
+		if !slices.Contains(g.Callees(runnerRun), want) {
+			t.Errorf("Runner::run should call %s; got %v", want, g.Callees(runnerRun))
+		}
+	}
+	if !slices.Contains(g.Callees(parserRun), parserParse) {
+		t.Errorf("Parser::run should call Parser::parse through self.parse; got %v", g.Callees(parserRun))
+	}
+	for _, c := range g.Callees(publicEntry) {
+		if sym := g.Defs[c]; sym != nil && sym.Kind == "type" {
+			t.Errorf("public_entry should not resolve Runner::new path segments to a type callee; got %s", c)
+		}
+	}
+}
+
+func TestRustScopedModuleCallFallsBackToFunction(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "crates/core/src/lib.rs", "pub fn public_entry() -> usize { 1 }\n")
+	write(t, root, "crates/cli/src/main.rs", "fn main() { corelib::public_entry(); }\n")
+
+	g, err := Builtin{}.Index(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Files == 0 {
+		t.Skipf("rust grammar not available: %s", g.Note)
+	}
+
+	main := qnameOf(t, g, "main")
+	entry := qnameOf(t, g, "public_entry")
+	if !slices.Contains(g.Callees(main), entry) {
+		t.Errorf("main should call corelib::public_entry by final path segment; got %v", g.Callees(main))
 	}
 }
 

@@ -93,6 +93,84 @@ func TestImpact(t *testing.T) {
 	}
 }
 
+func TestTraceFlowRustWorkspaceCallPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "crates", "core", "src"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "crates", "cli", "src"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"Cargo.toml": `[workspace]
+members = ["crates/core", "crates/cli"]
+resolver = "2"
+`,
+		"crates/core/src/lib.rs": `
+pub struct Parser;
+pub struct Runner;
+
+impl Parser {
+    pub fn new() -> Self { Self }
+    pub fn run(&self, input: &str) -> usize { self.parse(input) }
+    fn parse(&self, input: &str) -> usize { input.len() }
+}
+
+impl Runner {
+    pub fn new() -> Self { Self }
+    pub fn run(&self) -> usize { Parser::new().run("abc") }
+}
+
+pub fn public_entry() -> usize { Runner::new().run() }
+`,
+		"crates/cli/src/main.rs": `fn main() { corelib::public_entry(); }`,
+	}
+	for rel, content := range files {
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out, err := traceFlow(context.Background(), traceFlowInput{Root: root, Entry: "main", Depth: 6, Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reached []string
+	for _, n := range out.Nodes {
+		reached = append(reached, n.Symbol)
+	}
+	joined := strings.Join(reached, " ")
+	for _, want := range []string{"public_entry", "Runner::new", "Runner::run", "Parser::new", "Parser::run", "Parser::parse"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("trace from Rust workspace main should reach %s; symbols=%v note=%s", want, reached, out.Note)
+		}
+	}
+	if strings.Contains(joined, "Runner ") || strings.Contains(joined, "Parser ") {
+		t.Errorf("trace should not include Rust type path segments as call nodes; symbols=%v", reached)
+	}
+}
+
+func TestTraceFlowRustPreciseUnavailableExplainsDegradation(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "lib.rs"), []byte("pub fn helper() {}\npub fn run() { helper() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := traceFlow(context.Background(), traceFlowInput{Root: root, Entry: "run", Precise: true, Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.Note, "Rust semantic precision unavailable") {
+		t.Fatalf("precise Rust degradation note missing:\n%s", out.Note)
+	}
+	if !strings.Contains(out.Note, "Edges are syntactic") {
+		t.Fatalf("note should still include syntactic edge caveat:\n%s", out.Note)
+	}
+}
+
 func TestImpactUnknownSymbol(t *testing.T) {
 	root := graphFixture(t)
 	out, err := impactAnalysis(context.Background(), impactInput{Root: root, Symbol: "NoSuchThing"})

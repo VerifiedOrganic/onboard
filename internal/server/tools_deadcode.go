@@ -73,8 +73,8 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 		if len(g.Callers(q)) > 0 {
 			continue
 		}
-		exported := isExported(sym.Name)
-		conf, reason := orphanConfidence(sym.Kind, exported, g.Precise)
+		exported := symbolExported(sym)
+		conf, reason := orphanConfidence(symbolCallableKind(sym), exported, g.Precise)
 		orphans = append(orphans, orphan{
 			QName: q, Symbol: sym.Display(), File: sym.File, Line: sym.Line,
 			Kind: sym.Kind, Exported: exported, Confidence: conf, Reason: reason,
@@ -138,6 +138,26 @@ func isExported(name string) bool {
 	return unicode.IsUpper(r)
 }
 
+func symbolExported(sym *providers.Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	if strings.EqualFold(sym.Lang, "rust") {
+		return sym.Public
+	}
+	return isExported(sym.Name)
+}
+
+func symbolCallableKind(sym *providers.Symbol) string {
+	if sym == nil {
+		return ""
+	}
+	if sym.Kind == "method" || sym.Recv != "" {
+		return "method"
+	}
+	return sym.Kind
+}
+
 // orphanConfidence ranks how likely an uncalled callable is *truly* dead, given what the
 // graph can and cannot see. Methods are the weakest case without type-checked dispatch;
 // exported functions may serve external importers; unexported functions are the strongest
@@ -159,7 +179,10 @@ func deadCodeNote(g *providers.Graph, requestedPrecise bool) string {
 	base := "Leads, not verdicts: the syntactic graph cannot see calls via reflection, code generation, " +
 		"framework/DI registration, build-tagged files, or external importers — verify before deleting. " +
 		"Entry points (main/init) and test functions are already excluded."
-	return base + goPrecisionHint(g, requestedPrecise)
+	if requestedPrecise && !g.Precise {
+		return base + " " + semanticPrecisionUnavailableNote() + edgeCaveat(g)
+	}
+	return base + goPrecisionHint(g, requestedPrecise) + precisionNotes(g)
 }
 
 func registerDeadCodeTool(s *mcp.Server) {

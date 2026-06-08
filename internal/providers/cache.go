@@ -10,7 +10,7 @@ import (
 
 // cacheVersion is bumped whenever the on-disk format or the tagging/resolution logic
 // changes in a way that would make a stored index stale. A mismatch forces a rebuild.
-const cacheVersion = 3
+const cacheVersion = 4
 
 // diskRef/diskFile/diskIndex are the persisted form of the per-file tag data. The types
 // are unexported (not API surface); encoding/json serializes their exported fields.
@@ -18,6 +18,8 @@ type diskRef struct {
 	Caller string `json:"c"`
 	File   string `json:"f"`
 	Callee string `json:"n"`
+	Recv   string `json:"recv,omitempty"`
+	Bare   bool   `json:"bare,omitempty"`
 }
 
 type diskFile struct {
@@ -53,7 +55,13 @@ func toDiskRefs(refs []rawRef) []diskRef {
 	}
 	out := make([]diskRef, len(refs))
 	for i, r := range refs {
-		out[i] = diskRef{Caller: r.callerQName, File: r.callerFile, Callee: r.calleeName}
+		out[i] = diskRef{
+			Caller: r.callerQName,
+			File:   r.callerFile,
+			Callee: r.calleeName,
+			Recv:   r.calleeRecv,
+			Bare:   r.allowBare,
+		}
 	}
 	return out
 }
@@ -64,7 +72,13 @@ func fromDiskRefs(refs []diskRef) []rawRef {
 	}
 	out := make([]rawRef, len(refs))
 	for i, r := range refs {
-		out[i] = rawRef{callerQName: r.Caller, callerFile: r.File, calleeName: r.Callee}
+		out[i] = rawRef{
+			callerQName: r.Caller,
+			callerFile:  r.File,
+			calleeName:  r.Callee,
+			calleeRecv:  r.Recv,
+			allowBare:   r.Bare,
+		}
 	}
 	return out
 }

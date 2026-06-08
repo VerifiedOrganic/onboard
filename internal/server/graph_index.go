@@ -104,6 +104,7 @@ func graphCachePath(root string) string {
 // edgeCaveat returns the honesty caveat for a graph's call edges, upgraded when a precision
 // layer has proven some of them.
 func edgeCaveat(g *providers.Graph) string {
+	suffix := precisionNotes(g)
 	if g.Precise {
 		var parts []string
 		if strings.Contains(g.Precision, "go") {
@@ -115,9 +116,16 @@ func edgeCaveat(g *providers.Graph) string {
 		if len(parts) == 0 {
 			parts = append(parts, "Some call edges were enriched by a semantic backend")
 		}
-		return strings.Join(parts, "; ") + "; any unresolved edges remain syntactic (likely, not proven)."
+		return strings.Join(parts, "; ") + "; any unresolved edges remain syntactic (likely, not proven)." + suffix
 	}
-	return "Edges are syntactic (name + lexical scope), not type-checked: callers via dynamic dispatch or reflection may be missed, and same-named symbols may add noise. Treat as a strong lead, not a proof."
+	return "Edges are syntactic (name + lexical scope), not type-checked: callers via dynamic dispatch or reflection may be missed, and same-named symbols may add noise. Treat as a strong lead, not a proof." + suffix
+}
+
+func precisionNotes(g *providers.Graph) string {
+	if g == nil || len(g.PrecisionNotes) == 0 {
+		return ""
+	}
+	return " " + strings.Join(g.PrecisionNotes, " ")
 }
 
 // goPrecisionHint nudges a Go caller toward the type-checked path when the syntactic pass

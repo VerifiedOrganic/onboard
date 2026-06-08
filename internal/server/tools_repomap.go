@@ -163,6 +163,8 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 	}
 	if g.Precise {
 		out.Note += " " + edgeCaveat(g)
+	} else if in.Precise {
+		out.Note += " " + semanticPrecisionUnavailableNote() + edgeCaveat(g)
 	}
 	return out, nil
 }

@@ -23,9 +23,9 @@ const rustTagsQuery = `
 (static_item (identifier) @name) @definition.variable
 
 ; Call references — direct, method, scoped, and macro calls.
-(call_expression (identifier) @name) @reference.call
-(call_expression (field_expression (field_identifier) @name)) @reference.call
-(call_expression (scoped_identifier (identifier) @name)) @reference.call
+(call_expression function: (identifier) @name) @reference.call
+(call_expression function: (field_expression field: (field_identifier) @name)) @reference.call
+(call_expression function: (scoped_identifier name: (identifier) @name)) @reference.call
 (macro_invocation (identifier) @name) @reference.call
 `
 
@@ -85,6 +85,71 @@ func rustDefinitionIsTest(src []byte, declStart uint32) bool {
 	return strings.Contains(prefix, "#[test]") ||
 		strings.Contains(prefix, "::test]") ||
 		strings.Contains(prefix, "#[cfg(test)]")
+}
+
+func rustDefinitionIsPublic(src []byte, declStart, nameStart uint32) bool {
+	if int(declStart) > len(src) || int(nameStart) > len(src) || declStart >= nameStart {
+		return false
+	}
+	header := strings.TrimSpace(collapseSpace(string(src[declStart:nameStart])))
+	return strings.HasPrefix(header, "pub ") || strings.HasPrefix(header, "pub(")
+}
+
+func rustRefHint(src []byte, tagStart, nameStart uint32, caller *Symbol) (recv string, allowBare bool) {
+	allowBare = true
+	if int(tagStart) > len(src) || int(nameStart) > len(src) || tagStart >= nameStart {
+		return "", allowBare
+	}
+	prefix := strings.TrimRightFunc(string(src[tagStart:nameStart]), unicode.IsSpace)
+	switch {
+	case strings.HasSuffix(prefix, "::"):
+		recv = rustPathTail(strings.TrimSuffix(prefix, "::"))
+		if recv == "Self" && caller != nil {
+			recv = caller.Recv
+		}
+		return recv, true
+	case strings.HasSuffix(prefix, "."):
+		expr := strings.TrimSpace(strings.TrimSuffix(prefix, "."))
+		switch expr {
+		case "self", "Self":
+			if caller != nil {
+				return caller.Recv, false
+			}
+			return "", false
+		default:
+			if recv := rustReceiverFromConstructor(expr); recv != "" {
+				return recv, false
+			}
+			return "", false
+		}
+	default:
+		return "", true
+	}
+}
+
+func rustPathTail(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndex(s, "::"); i >= 0 {
+		s = s[i+2:]
+	}
+	return rustTypeName(s)
+}
+
+func rustReceiverFromConstructor(expr string) string {
+	expr = strings.TrimSpace(expr)
+	if !strings.HasSuffix(expr, "()") {
+		return ""
+	}
+	head := strings.TrimSpace(strings.TrimSuffix(expr, "()"))
+	i := strings.LastIndex(head, "::")
+	if i < 0 {
+		return ""
+	}
+	method := strings.TrimSpace(head[i+2:])
+	if method != "new" && method != "default" {
+		return ""
+	}
+	return rustPathTail(head[:i])
 }
 
 func indexRustKeyword(s, kw string) int {

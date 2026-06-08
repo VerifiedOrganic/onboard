@@ -29,6 +29,8 @@ type rawRef struct {
 	callerQName string
 	callerFile  string
 	calleeName  string
+	calleeRecv  string
+	allowBare   bool
 }
 
 // Index walks root and builds a syntactic call graph via tree-sitter tags, parsing
@@ -139,6 +141,7 @@ func tagFile(rel, lang string, src []byte, tags []ts.Tag) ([]*Symbol, []rawRef) 
 	local := map[string]*Symbol{}
 	var defs []*Symbol
 	var fileDefs []defSpan
+	byQName := map[string]*Symbol{}
 	for _, t := range tags {
 		if !strings.HasPrefix(t.Kind, "definition.") {
 			continue
@@ -165,9 +168,14 @@ func tagFile(rel, lang string, src []byte, tags []ts.Tag) ([]*Symbol, []rawRef) 
 			// definitions; qualify anything inside an impl/trait scope so maps and traces
 			// distinguish Engine::new from free fn new.
 			sym.Recv = rustOwner(src, t.NameRange.StartByte)
+			if sym.Recv != "" && kind == "function" {
+				sym.Kind = "method"
+			}
 			sym.Test = rustDefinitionIsTest(src, t.Range.StartByte)
+			sym.Public = rustDefinitionIsPublic(src, t.Range.StartByte, t.NameRange.StartByte)
 		}
 		local[qn] = sym
+		byQName[qn] = sym
 		defs = append(defs, sym)
 		fileDefs = append(fileDefs, defSpan{qname: qn, start: t.Range.StartByte, end: t.Range.EndByte})
 	}
@@ -180,7 +188,11 @@ func tagFile(rel, lang string, src []byte, tags []ts.Tag) ([]*Symbol, []rawRef) 
 		if caller == "" {
 			caller = rel + "::(top-level)"
 		}
-		refs = append(refs, rawRef{callerQName: caller, callerFile: rel, calleeName: t.Name})
+		ref := rawRef{callerQName: caller, callerFile: rel, calleeName: t.Name, allowBare: true}
+		if lang == "rust" {
+			ref.calleeRecv, ref.allowBare = rustRefHint(src, t.Range.StartByte, t.NameRange.StartByte, byQName[caller])
+		}
+		refs = append(refs, ref)
 	}
 	return defs, refs
 }
@@ -200,6 +212,9 @@ func assembleGraph(perFile map[string]fileData) *Graph {
 	defsByName := map[string][]string{}     // name -> qnames (global)
 	defsByFileName := map[string][]string{} // file\x00name -> qnames (same-file resolution)
 	defsByDirName := map[string][]string{}  // dir\x00name -> qnames (same-package/directory resolution)
+	defsByRecvName := map[string][]string{}
+	defsByFileRecvName := map[string][]string{}
+	defsByDirRecvName := map[string][]string{}
 	langSet := map[string]bool{}
 	var refs []rawRef
 
@@ -211,12 +226,17 @@ func assembleGraph(perFile map[string]fileData) *Graph {
 			defsByName[sym.Name] = append(defsByName[sym.Name], sym.QName)
 			defsByFileName[sym.File+"\x00"+sym.Name] = append(defsByFileName[sym.File+"\x00"+sym.Name], sym.QName)
 			defsByDirName[dirOf(sym.File)+"\x00"+sym.Name] = append(defsByDirName[dirOf(sym.File)+"\x00"+sym.Name], sym.QName)
+			if sym.Recv != "" {
+				defsByRecvName[sym.Recv+"\x00"+sym.Name] = append(defsByRecvName[sym.Recv+"\x00"+sym.Name], sym.QName)
+				defsByFileRecvName[sym.File+"\x00"+sym.Recv+"\x00"+sym.Name] = append(defsByFileRecvName[sym.File+"\x00"+sym.Recv+"\x00"+sym.Name], sym.QName)
+				defsByDirRecvName[dirOf(sym.File)+"\x00"+sym.Recv+"\x00"+sym.Name] = append(defsByDirRecvName[dirOf(sym.File)+"\x00"+sym.Recv+"\x00"+sym.Name], sym.QName)
+			}
 		}
 		refs = append(refs, fd.refs...)
 	}
 
 	for _, r := range refs {
-		callee := r.lookup(defsByFileName, defsByDirName, defsByName)
+		callee := r.lookup(defsByFileName, defsByDirName, defsByName, defsByFileRecvName, defsByDirRecvName, defsByRecvName)
 		if callee == "" || callee == r.callerQName {
 			if callee == "" {
 				g.Unresolved++
@@ -236,7 +256,7 @@ func assembleGraph(perFile map[string]fileData) *Graph {
 	return g
 }
 
-func (r rawRef) lookup(byFileName, byDirName, byName map[string][]string) string {
+func (r rawRef) lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvName, byRecvName map[string][]string) string {
 	// Resolve at the narrowest scope where the name is unambiguous, widening only when a
 	// scope yields no single match. At every tier the rule is identical: resolve ONLY when
 	// exactly one candidate exists, so an ambiguous name is left unresolved rather than
@@ -249,6 +269,19 @@ func (r rawRef) lookup(byFileName, byDirName, byName map[string][]string) string
 	//     name-only global check would otherwise drop as ambiguous. The len==1 guard keeps it
 	//     honest: two same-named methods in one package stay unresolved, never guessed.
 	//  3. Whole repo      — a globally unique name.
+	if r.calleeRecv != "" {
+		if q := lookupRecv(r.callerFile, r.calleeRecv, r.calleeName, byFileRecvName, byDirRecvName, byRecvName); q != "" {
+			return q
+		}
+		if left, _, ok := strings.Cut(r.calleeRecv, " as "); ok && left != "" {
+			if q := lookupRecv(r.callerFile, left, r.calleeName, byFileRecvName, byDirRecvName, byRecvName); q != "" {
+				return q
+			}
+		}
+	}
+	if !r.allowBare {
+		return ""
+	}
 	if cands := byFileName[r.callerFile+"\x00"+r.calleeName]; len(cands) == 1 {
 		return cands[0]
 	}
@@ -259,6 +292,19 @@ func (r rawRef) lookup(byFileName, byDirName, byName map[string][]string) string
 		return cands[0]
 	}
 	return "" // ambiguous or unknown
+}
+
+func lookupRecv(file, recv, name string, byFileRecvName, byDirRecvName, byRecvName map[string][]string) string {
+	if cands := byFileRecvName[file+"\x00"+recv+"\x00"+name]; len(cands) == 1 {
+		return cands[0]
+	}
+	if cands := byDirRecvName[dirOf(file)+"\x00"+recv+"\x00"+name]; len(cands) == 1 {
+		return cands[0]
+	}
+	if cands := byRecvName[recv+"\x00"+name]; len(cands) == 1 {
+		return cands[0]
+	}
+	return ""
 }
 
 // goReceiverType extracts the receiver type name from a Go method declaration header —

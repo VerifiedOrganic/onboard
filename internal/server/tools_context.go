@@ -180,6 +180,8 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 		out.Note = "Definitions-only provider: no call graph, so the pack contains only the seed's own definitions (no neighbors). Snippets are heuristic windows bounded by the next definition."
 	case g.Precise:
 		out.Note = "Relevance = call-graph proximity to the seed, refined by centrality and git churn. " + edgeCaveat(g) + " Snippets are heuristic windows bounded by the next definition, so a body may over- or under-shoot."
+	case in.Precise:
+		out.Note = "Relevance = call-graph proximity to the seed, refined by centrality and git churn. " + semanticPrecisionUnavailableNote() + edgeCaveat(g) + " Snippets are heuristic windows bounded by the next definition, so a body may over- or under-shoot."
 	default:
 		out.Note = "Relevance = call-graph proximity to the seed, refined by centrality and git churn. Edges are syntactic (likely, not proven); snippets are heuristic windows bounded by the next definition, so a body may over- or under-shoot."
 	}

@@ -28,14 +28,26 @@ const (
 // additive and non-fatal: any LSP, toolchain, indexing, or mapping failure leaves the
 // syntactic graph intact.
 func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
-	if g == nil || len(g.Defs) == 0 || !graphHasLang(g, "rust") || !rustAnalyzerAvailable(root) {
+	if g == nil || len(g.Defs) == 0 || !graphHasLang(g, "rust") {
+		return 0, nil
+	}
+	if ok, reason := rustAnalyzerStatus(root); !ok {
+		g.AddPrecisionNote("Rust semantic precision unavailable: " + reason + ".")
 		return 0, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, rustPrecisionTimeout)
 	defer cancel()
 
-	edges := rustAnalyzerEdges(ctx, root, g)
+	edges, stats := rustAnalyzerEdges(ctx, root, g)
+	if stats.Truncated {
+		g.AddPrecisionNote(fmt.Sprintf("Rust semantic precision queried %d of %d callable symbols; remaining symbols stayed syntactic.", stats.Queried, stats.Total))
+	}
+	if stats.Failure != "" {
+		g.AddPrecisionNote("Rust semantic precision failed: " + stats.Failure + ".")
+		return 0, nil
+	}
 	if len(edges) == 0 {
+		g.AddPrecisionNote("Rust semantic precision ran but returned zero call hierarchy edges.")
 		return 0, nil
 	}
 
@@ -99,8 +111,17 @@ func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
 	}
 	if proved {
 		g.MarkPrecision("rust-analyzer")
+	} else {
+		g.AddPrecisionNote("Rust semantic precision returned call hierarchy edges, but none mapped back to indexed symbols.")
 	}
 	return added, nil
+}
+
+type rustAnalyzerStats struct {
+	Total     int
+	Queried   int
+	Truncated bool
+	Failure   string
 }
 
 type rustPreciseEdge struct {
@@ -112,28 +133,24 @@ type rustPreciseEdge struct {
 	calleeName string
 }
 
-func rustAnalyzerEdges(ctx context.Context, root string, g *Graph) (out []rustPreciseEdge) {
+func rustAnalyzerEdges(ctx context.Context, root string, g *Graph) (out []rustPreciseEdge, stats rustAnalyzerStats) {
 	defer func() {
-		if recover() != nil {
+		if v := recover(); v != nil {
 			out = nil
+			stats.Failure = fmt.Sprint(v)
 		}
 	}()
 	client, err := newRustAnalyzerClient(ctx, root)
 	if err != nil {
-		return nil
+		stats.Failure = rustPrecisionFailure(err)
+		return nil, stats
 	}
 	defer client.close()
 
-	var qnames []string
-	for q, s := range g.Defs {
-		if strings.EqualFold(s.Lang, "rust") && (s.Kind == "function" || s.Kind == "method") {
-			qnames = append(qnames, q)
-		}
-	}
-	sort.Strings(qnames)
-	if len(qnames) > maxRustPreciseSyms {
-		qnames = qnames[:maxRustPreciseSyms]
-	}
+	qnames, total, truncated := rustCallableQNames(g)
+	stats.Total = total
+	stats.Queried = len(qnames)
+	stats.Truncated = truncated
 
 	opened := map[string]bool{}
 	for _, q := range qnames {
@@ -148,10 +165,18 @@ func rustAnalyzerEdges(ctx context.Context, root string, g *Graph) (out []rustPr
 		}
 		item, ok := client.prepareCallHierarchy(ctx, abs, s.Line, s.Column)
 		if !ok {
+			if err := ctx.Err(); err != nil {
+				stats.Failure = rustPrecisionFailure(err)
+				return out, stats
+			}
 			continue
 		}
 		calls, ok := client.outgoingCalls(ctx, item)
 		if !ok {
+			if err := ctx.Err(); err != nil {
+				stats.Failure = rustPrecisionFailure(err)
+				return out, stats
+			}
 			continue
 		}
 		for _, call := range calls {
@@ -169,7 +194,37 @@ func rustAnalyzerEdges(ctx context.Context, root string, g *Graph) (out []rustPr
 			})
 		}
 	}
-	return out
+	if err := ctx.Err(); err != nil {
+		stats.Failure = rustPrecisionFailure(err)
+	}
+	return out, stats
+}
+
+func rustPrecisionFailure(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "rust-analyzer timed out"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "rust-analyzer request was canceled"
+	}
+	return err.Error()
+}
+
+func rustCallableQNames(g *Graph) ([]string, int, bool) {
+	var qnames []string
+	if g != nil {
+		for q, s := range g.Defs {
+			if strings.EqualFold(s.Lang, "rust") && (s.Kind == "function" || s.Kind == "method") {
+				qnames = append(qnames, q)
+			}
+		}
+	}
+	sort.Strings(qnames)
+	total := len(qnames)
+	if len(qnames) > maxRustPreciseSyms {
+		return qnames[:maxRustPreciseSyms], total, true
+	}
+	return qnames, total, false
 }
 
 type rustAnalyzerClient struct {
@@ -431,22 +486,31 @@ func filePathFromURI(raw string) string {
 }
 
 func rustAnalyzerAvailable(root string) bool {
+	ok, _ := rustAnalyzerStatus(root)
+	return ok
+}
+
+func rustAnalyzerStatus(root string) (bool, string) {
 	if _, err := exec.LookPath("rust-analyzer"); err != nil {
-		return false
+		return false, "rust-analyzer binary was not found on PATH"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "rust-analyzer", "--version").Run(); err != nil {
-		return false
+	if out, err := exec.CommandContext(ctx, "rust-analyzer", "--version").CombinedOutput(); err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return false, "`rust-analyzer --version` failed: " + msg
 	}
 	dir := root
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "Cargo.toml")); err == nil {
-			return true
+			return true, ""
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return false
+			return false, "no Cargo.toml was found at or above the repo root"
 		}
 		dir = parent
 	}

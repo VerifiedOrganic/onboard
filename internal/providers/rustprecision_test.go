@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,6 +44,24 @@ func TestEnrichRustWithRustAnalyzer(t *testing.T) {
 	helper := qnameOf(t, g, "helper")
 	if !g.IsProven(run, helper) {
 		t.Fatalf("expected rust-analyzer to prove run -> helper; callees=%v", g.Callees(run))
+	}
+}
+
+func TestRustCallableQNamesReportsTruncation(t *testing.T) {
+	g := &Graph{Defs: map[string]*Symbol{}}
+	for i := 0; i < maxRustPreciseSyms+5; i++ {
+		q := fmt.Sprintf("src/lib.rs::f%03d", i)
+		g.Defs[q] = &Symbol{QName: q, Name: fmt.Sprintf("f%03d", i), Kind: "function", File: "src/lib.rs", Lang: "rust"}
+	}
+	qnames, total, truncated := rustCallableQNames(g)
+	if total != maxRustPreciseSyms+5 {
+		t.Fatalf("total = %d, want %d", total, maxRustPreciseSyms+5)
+	}
+	if len(qnames) != maxRustPreciseSyms {
+		t.Fatalf("queried = %d, want cap %d", len(qnames), maxRustPreciseSyms)
+	}
+	if !truncated {
+		t.Fatal("expected Rust precision symbol selection to report truncation")
 	}
 }
 

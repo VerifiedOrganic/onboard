@@ -67,3 +67,54 @@ func TestDeadCodeFindsOrphans(t *testing.T) {
 		t.Error("orphans are not ranked highest-confidence first")
 	}
 }
+
+func TestDeadCodeRustPublicAndMethodsAreNotHighConfidence(t *testing.T) {
+	root := t.TempDir()
+	writeRepoFile(t, root, "src/lib.rs", `
+pub struct Engine;
+
+impl Engine {
+    pub fn new() -> Self { Self }
+    pub fn used(&self) { self.helper() }
+    fn helper(&self) {}
+    pub fn unused_public_method(&self) {}
+    fn unused_private_method(&self) {}
+}
+
+pub fn public_api() {}
+fn private_orphan() {}
+fn caller() { Engine::new().used() }
+`)
+
+	out, err := deadCode(context.Background(), deadCodeInput{Root: root, Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]orphan{}
+	for _, o := range out.Orphans {
+		got[o.Symbol] = o
+	}
+	for _, alive := range []string{"Engine::new", "Engine::used", "Engine::helper"} {
+		if _, bad := got[alive]; bad {
+			t.Errorf("%s is reachable and must not be flagged dead; got %v", alive, out.Orphans)
+		}
+	}
+	if o, ok := got["public_api"]; !ok {
+		t.Errorf("uncalled Rust pub fn should be listed as a public API lead; got %v", out.Orphans)
+	} else if !o.Exported || o.Confidence != "medium" {
+		t.Errorf("public_api = exported %v confidence %q, want exported medium", o.Exported, o.Confidence)
+	}
+	if o, ok := got["private_orphan"]; !ok {
+		t.Errorf("private Rust orphan should be listed; got %v", out.Orphans)
+	} else if o.Confidence != "high" {
+		t.Errorf("private_orphan confidence = %q, want high", o.Confidence)
+	}
+	for _, method := range []string{"Engine::unused_public_method", "Engine::unused_private_method"} {
+		if o, ok := got[method]; !ok {
+			t.Errorf("%s should be listed as an uncalled method lead; got %v", method, out.Orphans)
+		} else if o.Confidence != "low" {
+			t.Errorf("%s confidence = %q, want low because syntactic Rust method dispatch is incomplete", method, o.Confidence)
+		}
+	}
+}

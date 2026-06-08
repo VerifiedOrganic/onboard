@@ -44,6 +44,9 @@ type Symbol struct {
 	// Test marks test entry points even when the file path does not identify them, notably
 	// Rust unit tests living inside src/*.rs behind #[test] / #[cfg(test)].
 	Test bool `json:"test,omitempty"`
+	// Public marks language-level public/exported symbols when capitalization is not the
+	// export convention, notably Rust `pub fn` and `pub` associated functions.
+	Public bool `json:"public,omitempty"`
 }
 
 // Display returns the human-facing name: a method is qualified by its receiver type
@@ -77,6 +80,10 @@ type Graph struct {
 	Precise     bool            `json:"precise,omitempty"`
 	Precision   string          `json:"precision,omitempty"` // comma-separated semantic backends, e.g. go,rust-analyzer
 	ProvenEdges map[string]bool `json:"-"`
+	// PrecisionNotes records semantic-backend degradation details: unavailable tools,
+	// timeouts, zero returned edges, or capped enrichment. Tools append these to honesty
+	// notes so precise:true failures are visible to users.
+	PrecisionNotes []string `json:"precision_notes,omitempty"`
 
 	// Incremental-indexing stats: how many files were reused from the on-disk cache
 	// vs. re-parsed. Unexported, so never serialized over MCP; observed only in tests.
@@ -109,6 +116,20 @@ func (g *Graph) MarkPrecision(kind string) {
 		return
 	}
 	g.Precision += "," + kind
+}
+
+// AddPrecisionNote records a unique user-facing note about semantic precision degradation.
+func (g *Graph) AddPrecisionNote(note string) {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return
+	}
+	for _, existing := range g.PrecisionNotes {
+		if existing == note {
+			return
+		}
+	}
+	g.PrecisionNotes = append(g.PrecisionNotes, note)
 }
 
 // Provider indexes a repository into a Graph.
