@@ -117,6 +117,12 @@ export const POST = async () => {};
 `)
 	writeRouteFile(t, root, "app/blog/[slug]/page.tsx", `export default function Page() { return null }`)
 	writeRouteFile(t, root, "pages/users/[id].tsx", `export default function User() { return null }`)
+	writeRouteFile(t, root, "src/App.tsx", `
+const routes = [
+	{ path: 'settings', element: <Settings /> },
+	{ path: 'profile/:id', element: <Profile /> },
+];
+`)
 	writeRouteFile(t, root, "app/app.routes.ts", `
 const routes = [
 	{ component: UserComponent, path: 'users' },
@@ -133,6 +139,8 @@ const routes = [
 		{"POST", "/:userId"},
 		{"GET", "/blog/:slug"},
 		{"GET", "/users/:id"},
+		{"ANY", "/settings"},
+		{"ANY", "/profile/:id"},
 		{"ANY", "/users"},
 		{"ANY", "/admin"},
 	}

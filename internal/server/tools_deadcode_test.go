@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -115,6 +116,39 @@ fn caller() { Engine::new().used() }
 			t.Errorf("%s should be listed as an uncalled method lead; got %v", method, out.Orphans)
 		} else if o.Confidence != "low" {
 			t.Errorf("%s confidence = %q, want low because syntactic Rust method dispatch is incomplete", method, o.Confidence)
+		}
+	}
+}
+
+func TestDeadCodeFrameworkManagedExcluded(t *testing.T) {
+	root := t.TempDir()
+	// Next.js page default export
+	writeRepoFile(t, root, "app/page.tsx", `
+export default function Page() { return null; }
+`)
+	// SvelteKit endpoint
+	writeRepoFile(t, root, "src/routes/api/+server.ts", `
+export async function GET() { return null; }
+export async function POST() { return null; }
+`)
+	// Remix / React Router loader & action
+	writeRepoFile(t, root, "app/routes/item.tsx", `
+export async function loader() { return null; }
+export async function action() { return null; }
+`)
+
+	out, err := deadCode(context.Background(), deadCodeInput{Root: root, Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, o := range out.Orphans {
+		if strings.Contains(o.Symbol, "Page") ||
+			strings.Contains(o.Symbol, "GET") ||
+			strings.Contains(o.Symbol, "POST") ||
+			strings.Contains(o.Symbol, "loader") ||
+			strings.Contains(o.Symbol, "action") {
+			t.Errorf("framework-managed symbol %q was falsely reported as dead code", o.Symbol)
 		}
 	}
 }

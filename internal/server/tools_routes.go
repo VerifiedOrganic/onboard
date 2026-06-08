@@ -224,7 +224,7 @@ func scanRoutes(content, file string, add func(method, path, file string, line i
 		if end > len(content) {
 			end = len(content)
 		}
-		if looksLikePath(path) && !strings.Contains(content[m[0]:end], "component") {
+		if (looksLikePath(path) || looksLikeReactRouterPath(path)) && !strings.Contains(content[m[0]:end], "component") {
 			add("ANY", "/"+strings.TrimPrefix(path, "/"), file, lineAt(content, m[0]), "regex-heuristic", "React Router", "medium")
 		}
 	}
@@ -484,6 +484,23 @@ func scanServerMethods(content string) []string {
 
 func looksLikePath(s string) bool {
 	return strings.HasPrefix(s, "/") || strings.HasPrefix(s, ":")
+}
+
+func looksLikeReactRouterPath(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if strings.ContainsAny(s, " \t\n\r{}()[]<>\"'") {
+		return false
+	}
+	if idx := strings.LastIndex(s, "."); idx >= 0 {
+		ext := strings.ToLower(s[idx:])
+		if ext == ".js" || ext == ".ts" || ext == ".jsx" || ext == ".tsx" || ext == ".json" || ext == ".css" || ext == ".html" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" {
+			return false
+		}
+	}
+	return true
 }
 
 func splitMethods(s string) []string {

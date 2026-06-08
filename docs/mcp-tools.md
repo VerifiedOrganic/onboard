@@ -129,7 +129,7 @@ follow to the destination path, and binary files count as zero lines. Degrades g
 (a `note`, no error) outside a git repo.
 
 ### `dead_code`
-*`internal/server/tools_deadcode.go`* — Find callable definitions (functions and methods) with **no caller in the indexed graph** — a lead for code an autonomous build wrote but never wired in. Reads the same call graph as `trace_flow`/`impact`; an orphan is a def whose `Reverse` set is empty. Entry points (`main`, `init`), Go test/benchmark/fuzz/example functions, and test files are excluded.
+*`internal/server/tools_deadcode.go`* — Find callable definitions (functions and methods) with **no caller in the indexed graph** — a lead for code an autonomous build wrote but never wired in. Reads the same call graph as `trace_flow`/`impact`; an orphan is a def whose `Reverse` set is empty. Entry points (`main`, `init`), Go test/benchmark/fuzz/example functions, test files, and framework-managed components/endpoints (Next.js page/layout components, SvelteKit routing handlers/endpoints, Remix/React Router loader/action entry points, Angular component lifecycle hooks) are excluded or marked low-confidence.
 
 **Input:**
 | Field | JSON | Type | Description |

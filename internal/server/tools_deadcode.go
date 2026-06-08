@@ -152,7 +152,7 @@ func isNextEntry(sym *providers.Symbol) bool {
 		if base == "page.tsx" || base == "page.ts" || base == "page.jsx" || base == "page.js" ||
 			base == "layout.tsx" || base == "layout.js" || base == "layout.jsx" || base == "layout.ts" ||
 			base == "error.tsx" || base == "loading.tsx" || base == "not-found.tsx" {
-			if name == "default" {
+			if name == "default" || (len(name) > 0 && unicode.IsUpper(rune(name[0]))) {
 				return true
 			}
 		}
@@ -163,7 +163,7 @@ func isNextEntry(sym *providers.Symbol) bool {
 			}
 		}
 		if strings.Contains(slashed, "/pages/") {
-			if name == "default" || name == "getServerSideProps" || name == "getStaticProps" || name == "getStaticPaths" {
+			if name == "default" || (len(name) > 0 && unicode.IsUpper(rune(name[0]))) || name == "getServerSideProps" || name == "getStaticProps" || name == "getStaticPaths" {
 				return true
 			}
 		}
@@ -215,6 +215,26 @@ func isReactComponent(sym *providers.Symbol) bool {
 	return false
 }
 
+func isRemixOrReactRouterEntry(sym *providers.Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	if sym.Lang != "javascript" && sym.Lang != "typescript" && sym.Lang != "tsx" {
+		return false
+	}
+	name := sym.Name
+	if name == "loader" || name == "action" || name == "headers" || name == "meta" || name == "default" {
+		return true
+	}
+	slashed := "/" + filepath.ToSlash(sym.File)
+	if strings.Contains(slashed, "/routes/") {
+		if len(name) > 0 && unicode.IsUpper(rune(name[0])) {
+			return true
+		}
+	}
+	return false
+}
+
 func isFrameworkOrEntrySymbol(sym *providers.Symbol) bool {
 	if sym == nil {
 		return false
@@ -223,6 +243,9 @@ func isFrameworkOrEntrySymbol(sym *providers.Symbol) bool {
 		return true
 	}
 	if isNextEntry(sym) {
+		return true
+	}
+	if isRemixOrReactRouterEntry(sym) {
 		return true
 	}
 	if isAngularLifecycleHook(sym.Name) {
