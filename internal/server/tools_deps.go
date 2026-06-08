@@ -12,7 +12,7 @@ import (
 )
 
 // deps extracts the EXTERNAL dependency graph straight from manifests — a deterministic fact,
-// not a syntactic inference. It feeds the architecture-cartographer (which otherwise asks the
+// not a syntactic inference. It feeds the onboard-architecture-cartographer (which otherwise asks the
 // LLM to guess a project's dependencies) and answers "what does this project pull in" without
 // reading a line of source.
 

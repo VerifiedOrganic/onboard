@@ -10,10 +10,10 @@ codebase — yours, or one you've been handed and don't yet trust.
 ## Step 0 — You'll need
 
 - **Go 1.25 or newer** to build from source (the path below).
-- **At least one MCP-capable agent** installed: Claude Code, Codex, Grok, opencode, or
-  Cursor. `onboard` wires itself into whichever ones it finds. (MCP = the Model Context
-  Protocol — the open standard those agents use to talk to external tools. If your agent
-  speaks MCP, onboard works with it.)
+- **At least one MCP-capable agent** installed: Claude Code, Codex, Grok, opencode,
+  Cursor, Copilot CLI, or Junie CLI. `onboard` wires itself into whichever ones it
+  finds. (MCP = the Model Context Protocol — the open standard those agents use to talk to
+  external tools. If your agent speaks MCP, onboard works with it.)
 
 No Go? Grab a prebuilt binary from the project's releases (built with GoReleaser) and skip
 straight to Step 2 — every command below is the same, you just won't run `go build`.
@@ -50,6 +50,9 @@ Scanning for installed agents...
 > files total (a `SKILL.md` plus reference docs each). `init` counts the files it wrote;
 > `doctor` (next step) counts the 5 bundles. Same skills, different unit. Only the agents
 > you actually have installed show up — don't worry about the ones that say "not detected."
+> On upgrades from older onboard releases, the line may also say it cleaned legacy skill
+> dirs; that means old unprefixed onboard skills were replaced by the current `onboard-*`
+> names.
 
 Want just one, or one that isn't detected yet? Name it explicitly — this creates the dirs
 it needs:
@@ -58,7 +61,7 @@ it needs:
 ./onboard install --agent claude
 ```
 
-> The five agents genuinely disagree on config format (JSON here, TOML there, and opencode
+> The supported agents genuinely disagree on config format (JSON here, TOML there, and opencode
 > in a category of its own). The installer speaks all of them so you don't have to. The
 > gory details live in [install.md](install.md).
 
@@ -104,9 +107,18 @@ From there it goes one move at a time — orient, explore, surface the risky bit
 understanding — pausing so you can say `next`, go `deeper`, `jump` somewhere, or `switch
 direction`. You're driving; it's navigating.
 
+Not sure which onboard workflow you need? Type:
+
+```
+/onboard-skills
+```
+
+That shows the shipped `onboard-*` skill catalog with example prompts for diagrams,
+blast-radius checks, risk audits, and guide maintenance.
+
 > No `/onboard` command in your agent? Some clients don't surface MCP prompts. You can still
 > ask the agent in plain language — *"walk me through this codebase"* — and it'll use
-> onboard's tools and the `codebase-walkthrough` skill the same way.
+> onboard's tools and the `onboard-codebase-walkthrough` skill the same way.
 
 ## Step 5 — Poke at a tool directly
 
@@ -150,7 +162,7 @@ your terminal — the analysis lives behind the MCP tools.
 |---------|------------------|-----|
 | `doctor` says `registered=false` | onboard isn't in that agent's config | `./onboard install --agent <name>` |
 | `doctor` says `bin=false` | the config points at a binary that moved | re-run `install` to refresh the path |
-| `init` says "No agents detected" | none of the five are installed where expected | install an agent, or force one with `install --agent` |
+| `init` says "No agents detected" | none of the supported agents are installed where expected | install an agent, or force one with `install --agent` |
 | `/onboard` isn't there | your client doesn't surface MCP prompts | ask in plain language; the tools still work |
 | The tour's edges look thin on a Go or Rust repo | syntactic graph missed dispatch/method calls | re-run the relevant tool with **precise mode** (`go` or `rust-analyzer` must be installed) |
 

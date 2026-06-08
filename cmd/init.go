@@ -12,7 +12,7 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Detect installed agents and wire onboard into each",
-	Long:  "Scans for installed agents (Claude Code, Grok, Codex, opencode, Cursor) and installs onboard into every one it finds. A convenience wrapper over `install --all`.",
+	Long:  "Scans for installed agents (Claude Code, Grok, Codex, opencode, Cursor, Copilot CLI, Junie CLI) and installs onboard into every one it finds. A convenience wrapper over `install --all`.",
 	RunE: func(_ *cobra.Command, _ []string) error {
 		bin, err := os.Executable()
 		if err != nil {
@@ -38,8 +38,8 @@ var initCmd = &cobra.Command{
 				failures++
 				continue
 			}
-			fmt.Printf("  ✓ %-9s config: %-15s skills: %d file(s)\n",
-				res.Agent, res.ConfigAction, res.SkillFiles)
+			fmt.Printf("  ✓ %-9s config: %-15s skills: %d file(s)%s\n",
+				res.Agent, res.ConfigAction, res.SkillFiles, cleanupSuffix(res.SkillDirsCleaned))
 		}
 		if found == 0 {
 			fmt.Println("\nNo agents detected. Install one, or use `onboard install --agent <name>` to force a target.")

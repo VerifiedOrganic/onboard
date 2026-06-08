@@ -59,6 +59,34 @@ func TestRegisterJSONMcpServersPreservesAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRegisterJSONMcpServersWithTools(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp-config.json")
+	action, err := registerJSONMcpServersWithTools(path, "/usr/local/bin/onboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != "merged" {
+		t.Errorf("action = %q, want merged", action)
+	}
+	root := readJSON(t, path)
+	servers := root["mcpServers"].(map[string]any)
+	ob := servers["onboard"].(map[string]any)
+	if ob["command"] != "/usr/local/bin/onboard" {
+		t.Errorf("command = %v", ob["command"])
+	}
+	if ob["type"] != "local" {
+		t.Errorf("type = %v, want local", ob["type"])
+	}
+	args := ob["args"].([]any)
+	if len(args) != 1 || args[0] != "serve" {
+		t.Errorf("args = %v, want [serve]", args)
+	}
+	tools := ob["tools"].([]any)
+	if len(tools) != 1 || tools[0] != "*" {
+		t.Errorf("tools = %v, want [*]", tools)
+	}
+}
+
 func TestRegisterJSONBacksUpUnparseable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	if err := os.WriteFile(path, []byte("{ this is not json"), 0o644); err != nil {
@@ -168,15 +196,65 @@ func TestRegisterTOMLAppendsAndIsIdempotent(t *testing.T) {
 
 func TestInstallSkills(t *testing.T) {
 	dir := t.TempDir()
-	n, err := installSkills(dir)
+	n, removed, err := installSkills(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n == 0 {
 		t.Fatal("installSkills wrote nothing")
 	}
-	if !exists(filepath.Join(dir, "codebase-walkthrough", "SKILL.md")) {
+	if removed != 0 {
+		t.Fatalf("fresh install removed %d legacy dirs, want 0", removed)
+	}
+	if !exists(filepath.Join(dir, "onboard-codebase-walkthrough", "SKILL.md")) {
 		t.Error("expected SKILL.md in installed skill dir")
+	}
+}
+
+func TestInstallSkillsCleansLegacyOnboardDirs(t *testing.T) {
+	dir := t.TempDir()
+	legacyDir := filepath.Join(dir, "codebase-walkthrough")
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "SKILL.md"), []byte("---\nname: codebase-walkthrough\n---\n# Codebase Walkthrough\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, removed, err := installSkills(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if exists(legacyDir) {
+		t.Error("legacy codebase-walkthrough dir still exists")
+	}
+	if !exists(filepath.Join(dir, "onboard-codebase-walkthrough", "SKILL.md")) {
+		t.Error("new onboard-codebase-walkthrough dir missing")
+	}
+}
+
+func TestInstallSkillsDoesNotCleanCustomLegacyNamedDirs(t *testing.T) {
+	dir := t.TempDir()
+	customDir := filepath.Join(dir, "codebase-walkthrough")
+	if err := os.MkdirAll(customDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(customDir, "SKILL.md"), []byte("---\nname: codebase-walkthrough\n---\n# My Custom Skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, removed, err := installSkills(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 {
+		t.Fatalf("removed = %d, want 0", removed)
+	}
+	if !exists(customDir) {
+		t.Error("custom legacy-named dir was removed")
 	}
 }
 
@@ -197,8 +275,8 @@ func TestRegistryShapes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) < 5 {
-		t.Errorf("expected >=5 agents, got %d", len(all))
+	if len(all) < 7 {
+		t.Errorf("expected >=7 agents, got %d", len(all))
 	}
 	byName := map[string]Agent{}
 	for _, a := range all {
@@ -215,6 +293,24 @@ func TestRegistryShapes(t *testing.T) {
 	}
 	if byName["claude"].Shape != ShapeJSONMcpServers {
 		t.Error("claude should be JSON mcpServers")
+	}
+	if byName["copilot"].Shape != ShapeJSONMcpServersWithTools {
+		t.Error("copilot should be JSON mcpServers with tools")
+	}
+	if byName["junie"].Shape != ShapeJSONMcpServers {
+		t.Error("junie should be JSON mcpServers")
+	}
+	if !strings.HasSuffix(byName["copilot"].ConfigPath, filepath.Join(".copilot", "mcp-config.json")) {
+		t.Errorf("copilot config path = %q", byName["copilot"].ConfigPath)
+	}
+	if !strings.HasSuffix(byName["copilot"].SkillsDir, filepath.Join(".copilot", "skills")) {
+		t.Errorf("copilot skills path = %q", byName["copilot"].SkillsDir)
+	}
+	if !strings.HasSuffix(byName["junie"].ConfigPath, filepath.Join(".junie", "mcp", "mcp.json")) {
+		t.Errorf("junie config path = %q", byName["junie"].ConfigPath)
+	}
+	if !strings.HasSuffix(byName["junie"].SkillsDir, filepath.Join(".junie", "skills")) {
+		t.Errorf("junie skills path = %q", byName["junie"].SkillsDir)
 	}
 }
 
@@ -238,6 +334,29 @@ func TestRegistryHonorsCodexHome(t *testing.T) {
 	}
 	if codex.SkillsDir != filepath.Join(dir, "skills") {
 		t.Errorf("codex skills dir = %q, want CODEX_HOME skills", codex.SkillsDir)
+	}
+}
+
+func TestRegistryHonorsCopilotHome(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("COPILOT_HOME", dir)
+
+	all, err := Registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var copilot Agent
+	for _, a := range all {
+		if a.Name == "copilot" {
+			copilot = a
+			break
+		}
+	}
+	if copilot.ConfigPath != filepath.Join(dir, "mcp-config.json") {
+		t.Errorf("copilot config path = %q, want COPILOT_HOME config", copilot.ConfigPath)
+	}
+	if copilot.SkillsDir != filepath.Join(dir, "skills") {
+		t.Errorf("copilot skills dir = %q, want COPILOT_HOME skills", copilot.SkillsDir)
 	}
 }
 

@@ -96,7 +96,7 @@ convention. Big win for large repos and repeated sessions.
 
 **Gap.** `internal/git` only does SHA/branch/diff. There's no notion of *which code changes
 often, who owns it, or what's a hotspot* — signals DeepWiki and CodeScene-style tools use to
-prioritize. The `test-gap-and-risk-auditor` skill would be far sharper with them.
+prioritize. The `onboard-test-gap-and-risk-auditor` skill would be far sharper with them.
 
 **Proposal.** Extend `internal/git` (pure-Go, via the `git` CLI) with churn
 (`git log --numstat`), recency, and ownership (`git shortlog`/blame summaries), exposed as a
@@ -175,7 +175,7 @@ natural extension.
 > [code-graph.md](code-graph.md#structured-extractors) and [mcp-tools.md](mcp-tools.md#structured-extractors).
 > Follow-ups: ORM-model schema extraction (GORM/Prisma/SQLAlchemy), TOML deps via a real parser.
 
-**Gap.** `architecture-cartographer` asks the LLM to draw ERDs and sequence diagrams without
+**Gap.** `onboard-architecture-cartographer` asks the LLM to draw ERDs and sequence diagrams without
 structured input. DeepWiki extracts dependency graphs and sequence diagrams directly. onboard
 can derive several of these deterministically.
 

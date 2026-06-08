@@ -84,7 +84,7 @@ func Inspect(a Agent) Health {
 // config is absent, unparseable, or has no onboard entry.
 func configuredBin(a Agent) (string, bool) {
 	switch a.Shape {
-	case ShapeJSONMcpServers:
+	case ShapeJSONMcpServers, ShapeJSONMcpServersWithTools:
 		return jsonServerCommand(a.ConfigPath, "mcpServers")
 	case ShapeJSONOpencode:
 		return jsonServerCommand(a.ConfigPath, "mcp")

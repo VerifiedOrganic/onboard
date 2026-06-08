@@ -9,6 +9,8 @@
 //
 //   - ShapeJSONMcpServers: JSON, top-level "mcpServers" object, entry is
 //     {command, args}. Used by Claude Code, Cursor, and the npm grok-cli.
+//   - ShapeJSONMcpServersWithTools: same as ShapeJSONMcpServers, plus type:"local"
+//     and tools:["*"]. Used by GitHub Copilot CLI.
 //   - ShapeJSONOpencode: JSON, top-level "mcp" object (the outlier), entry is
 //     {type:"local", command:[bin, args...], enabled, environment}.
 //   - ShapeTOMLMcpServers: TOML, [mcp_servers.<name>] table with command/args.
@@ -30,6 +32,8 @@ type Shape int
 const (
 	// ShapeJSONMcpServers stores MCP servers under a top-level mcpServers object.
 	ShapeJSONMcpServers Shape = iota
+	// ShapeJSONMcpServersWithTools stores MCP servers under mcpServers with a tools allowlist.
+	ShapeJSONMcpServersWithTools
 	// ShapeJSONOpencode stores opencode local servers under a top-level mcp object.
 	ShapeJSONOpencode
 	// ShapeTOMLMcpServers stores MCP servers as mcp_servers TOML tables.
@@ -38,7 +42,7 @@ const (
 
 // Agent describes how to install onboard into a particular coding agent.
 type Agent struct {
-	Name       string // canonical id: claude, codex, grok, opencode, cursor
+	Name       string // canonical id: claude, codex, grok, opencode, cursor, copilot, junie
 	SkillsDir  string // absolute dir for native skill files
 	ConfigPath string // absolute path to the agent's MCP config file
 	Shape      Shape  // how the server entry is encoded
@@ -65,6 +69,16 @@ func Registry() ([]Agent, error) {
 			codexHome = abs
 		}
 	}
+	copilotHome := j(".copilot")
+	if env := strings.TrimSpace(os.Getenv("COPILOT_HOME")); env != "" {
+		copilotHome = env
+		if !filepath.IsAbs(copilotHome) {
+			copilotHome = filepath.Join(home, copilotHome)
+		}
+		if abs, err := filepath.Abs(copilotHome); err == nil {
+			copilotHome = abs
+		}
+	}
 
 	// Grok ships in two flavors: the xAI Grok Build CLI (TOML at
 	// ~/.grok/config.toml) and the npm grok-cli (JSON at
@@ -82,6 +96,8 @@ func Registry() ([]Agent, error) {
 		grok,
 		{Name: "opencode", SkillsDir: j(".config", "opencode", "skills"), ConfigPath: j(".config", "opencode", "opencode.json"), Shape: ShapeJSONOpencode},
 		{Name: "cursor", SkillsDir: j(".cursor", "skills"), ConfigPath: j(".cursor", "mcp.json"), Shape: ShapeJSONMcpServers},
+		{Name: "copilot", SkillsDir: filepath.Join(copilotHome, "skills"), ConfigPath: filepath.Join(copilotHome, "mcp-config.json"), Shape: ShapeJSONMcpServersWithTools},
+		{Name: "junie", SkillsDir: j(".junie", "skills"), ConfigPath: j(".junie", "mcp", "mcp.json"), Shape: ShapeJSONMcpServers},
 	}, nil
 }
 
@@ -97,7 +113,7 @@ func Find(name string) (Agent, error) {
 			return a, nil
 		}
 	}
-	return Agent{}, fmt.Errorf("unknown agent %q (known: claude, codex, grok, opencode, cursor)", name)
+	return Agent{}, fmt.Errorf("unknown agent %q (known: claude, codex, grok, opencode, cursor, copilot, junie)", name)
 }
 
 // Detected reports whether the agent appears installed (its config or skills
@@ -111,9 +127,10 @@ func Detected(a Agent) bool {
 
 // Result reports what an install did for one agent.
 type Result struct {
-	Agent        string
-	SkillFiles   int
-	ConfigAction string // merged | appended | already-present | skipped
+	Agent            string
+	SkillFiles       int
+	SkillDirsCleaned int
+	ConfigAction     string // merged | appended | already-present | skipped
 }
 
 // Install writes the skill bundle and registers the onboard MCP server in the
@@ -122,11 +139,12 @@ func Install(a Agent, binPath string) (Result, error) {
 	res := Result{Agent: a.Name}
 
 	if a.SkillsDir != "" {
-		n, err := installSkills(a.SkillsDir)
+		n, removed, err := installSkills(a.SkillsDir)
 		if err != nil {
 			return res, err
 		}
 		res.SkillFiles = n
+		res.SkillDirsCleaned = removed
 	}
 
 	action, err := registerMCP(a, binPath)
@@ -137,10 +155,10 @@ func Install(a Agent, binPath string) (Result, error) {
 	return res, nil
 }
 
-func installSkills(skillsDir string) (int, error) {
+func installSkills(skillsDir string) (int, int, error) {
 	all, err := skills.List()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	count := 0
 	for _, sk := range all {
@@ -151,21 +169,62 @@ func installSkills(skillsDir string) (int, error) {
 		}
 		files, err := sk.Files()
 		if err != nil {
-			return count, err
+			return count, 0, err
 		}
 		base := filepath.Join(skillsDir, sk.Name)
 		for rel, content := range files {
 			dst := filepath.Join(base, rel)
 			if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-				return count, err
+				return count, 0, err
 			}
 			if err := os.WriteFile(dst, content, 0o644); err != nil {
-				return count, err
+				return count, 0, err
 			}
 			count++
 		}
 	}
-	return count, nil
+	removed, err := cleanupLegacySkillDirs(skillsDir)
+	if err != nil {
+		return count, removed, err
+	}
+	return count, removed, nil
+}
+
+func cleanupLegacySkillDirs(skillsDir string) (int, error) {
+	removed := 0
+	for legacy, canonical := range skills.LegacyAliases() {
+		legacyDir := filepath.Join(skillsDir, legacy)
+		canonicalDir := filepath.Join(skillsDir, canonical)
+		if !exists(canonicalDir) || !looksLikeLegacyOnboardSkill(legacyDir, legacy) {
+			continue
+		}
+		if err := os.RemoveAll(legacyDir); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+var legacySkillHeadings = map[string]string{
+	"architecture-cartographer":  "# Architecture Cartographer",
+	"codebase-walkthrough":       "# Codebase Walkthrough",
+	"dependency-impact-analyzer": "# Dependency Impact Analyzer",
+	"guide-maintainer":           "# Guide Maintainer",
+	"test-gap-and-risk-auditor":  "# Test Gap and Risk Auditor",
+}
+
+func looksLikeLegacyOnboardSkill(dir, legacy string) bool {
+	heading, ok := legacySkillHeadings[legacy]
+	if !ok {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	if err != nil {
+		return false
+	}
+	text := string(data)
+	return strings.Contains(text, "name: "+legacy) && strings.Contains(text, heading)
 }
 
 // MCP-config registration lives in agent_config.go.

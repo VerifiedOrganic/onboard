@@ -15,24 +15,24 @@ func TestListFindsEmbeddedSkill(t *testing.T) {
 	}
 	var found bool
 	for _, s := range all {
-		if s.Name == "codebase-walkthrough" {
+		if s.Name == "onboard-codebase-walkthrough" {
 			found = true
 			if s.Description == "" {
-				t.Error("codebase-walkthrough has empty description (frontmatter not parsed)")
+				t.Error("onboard-codebase-walkthrough has empty description (frontmatter not parsed)")
 			}
 		}
 	}
 	if !found {
-		t.Errorf("codebase-walkthrough not in %v", names(all))
+		t.Errorf("onboard-codebase-walkthrough not in %v", names(all))
 	}
 }
 
 func TestGet(t *testing.T) {
-	s, err := Get("codebase-walkthrough")
+	s, err := Get("onboard-codebase-walkthrough")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if s.Name != "codebase-walkthrough" {
+	if s.Name != "onboard-codebase-walkthrough" {
 		t.Errorf("name = %q", s.Name)
 	}
 	if _, err := Get("does-not-exist"); err == nil {
@@ -40,8 +40,52 @@ func TestGet(t *testing.T) {
 	}
 }
 
-func TestRenderIncludesReferences(t *testing.T) {
+func TestGetAcceptsLegacyUnprefixedNames(t *testing.T) {
 	s, err := Get("codebase-walkthrough")
+	if err != nil {
+		t.Fatalf("Get legacy alias: %v", err)
+	}
+	if s.Name != "onboard-codebase-walkthrough" {
+		t.Errorf("legacy alias resolved to %q, want onboard-codebase-walkthrough", s.Name)
+	}
+}
+
+func TestCatalogCoversEmbeddedSkills(t *testing.T) {
+	all, err := List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog) != len(all) {
+		t.Fatalf("catalog has %d entries, want %d", len(catalog), len(all))
+	}
+	for i, entry := range catalog {
+		if !strings.HasPrefix(entry.Name, "onboard-") {
+			t.Errorf("catalog entry %q is not namespaced", entry.Name)
+		}
+		if entry.Summary == "" {
+			t.Errorf("catalog entry %q has no summary", entry.Name)
+		}
+		if i == 0 && entry.Name != "onboard-codebase-walkthrough" {
+			t.Errorf("first catalog entry = %q, want onboard-codebase-walkthrough", entry.Name)
+		}
+	}
+	md, err := CatalogMarkdown()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"/onboard", "/onboard-skills", "onboard-dependency-impact-analyzer"} {
+		if !strings.Contains(md, marker) {
+			t.Errorf("catalog markdown missing %q", marker)
+		}
+	}
+}
+
+func TestRenderIncludesReferences(t *testing.T) {
+	s, err := Get("onboard-codebase-walkthrough")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +106,7 @@ func TestRenderIncludesReferences(t *testing.T) {
 }
 
 func TestFiles(t *testing.T) {
-	s, err := Get("codebase-walkthrough")
+	s, err := Get("onboard-codebase-walkthrough")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,8 +130,8 @@ func TestAllEmbeddedSkillsValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"architecture-cartographer", "codebase-walkthrough",
-		"dependency-impact-analyzer", "guide-maintainer", "test-gap-and-risk-auditor",
+		"onboard-architecture-cartographer", "onboard-codebase-walkthrough",
+		"onboard-dependency-impact-analyzer", "onboard-guide-maintainer", "onboard-test-gap-and-risk-auditor",
 	}
 	have := map[string]bool{}
 	for _, s := range all {

@@ -47,8 +47,8 @@ Examples:
 				failures++
 				continue
 			}
-			fmt.Printf("  ✓ %-9s config: %-15s skills: %d file(s)\n",
-				res.Agent, res.ConfigAction, res.SkillFiles)
+			fmt.Printf("  ✓ %-9s config: %-15s skills: %d file(s)%s\n",
+				res.Agent, res.ConfigAction, res.SkillFiles, cleanupSuffix(res.SkillDirsCleaned))
 		}
 		fmt.Println("\nRestart your agent(s) to pick up the onboard MCP server.")
 		if failures > 0 {
@@ -56,6 +56,16 @@ Examples:
 		}
 		return nil
 	},
+}
+
+func cleanupSuffix(n int) string {
+	if n == 0 {
+		return ""
+	}
+	if n == 1 {
+		return " (cleaned 1 legacy dir)"
+	}
+	return fmt.Sprintf(" (cleaned %d legacy dirs)", n)
 }
 
 func resolveTargets() ([]agents.Agent, error) {
@@ -86,7 +96,7 @@ func resolveTargets() ([]agents.Agent, error) {
 }
 
 func init() {
-	installCmd.Flags().StringVar(&installAgent, "agent", "", "agent to install into (claude|grok|codex|opencode|cursor)")
+	installCmd.Flags().StringVar(&installAgent, "agent", "", "agent to install into (claude|grok|codex|opencode|cursor|copilot|junie)")
 	installCmd.Flags().BoolVar(&installAll, "all", false, "install into all detected agents")
 	rootCmd.AddCommand(installCmd)
 }

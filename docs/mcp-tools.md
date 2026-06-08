@@ -64,7 +64,7 @@ Conventions shared by most tools:
 **Input:**
 | Field | JSON | Type | Description |
 |-------|------|------|-------------|
-| Name | `name` | string | the skill name, e.g. `codebase-walkthrough` |
+| Name | `name` | string | the skill name, e.g. `onboard-codebase-walkthrough` |
 
 **Output:**
 | Field | JSON | Type |
@@ -360,7 +360,7 @@ cross-directory call edges are drawn.
 
 Deterministic extractors that read **facts** from manifests, DDL, and route registrations —
 no call graph, no inference, so they carry no "likely, not proven" caveat. They feed the
-architecture-cartographer, which otherwise asks the model to guess these. See
+onboard-architecture-cartographer, which otherwise asks the model to guess these. See
 [code-graph.md](code-graph.md#structured-extractors).
 
 ### `deps`
@@ -420,15 +420,15 @@ the on-disk format and lifecycle.
 `registerSkillResources` (`internal/server/resources.go`) adds **one resource per
 embedded skill**:
 
-- **URI:** `onboard://skills/<name>` (e.g. `onboard://skills/codebase-walkthrough`)
+- **URI:** `onboard://skills/<name>` (e.g. `onboard://skills/onboard-codebase-walkthrough`)
 - **MIME type:** `text/markdown`
 - **Body:** the fully rendered skill (`SKILL.md` + reference files)
 
 The exact set of URIs is whatever skills are embedded in the binary at build time.
 
-## Prompt
+## Prompts
 
-`registerPrompt` (`internal/server/prompts.go`) adds exactly one prompt:
+`registerPrompt` (`internal/server/prompts.go`) adds two prompts:
 
 - **Name:** `onboard`
 - **Arguments:** `direction` (optional) — `outside-in` (entry points → core) or
@@ -441,7 +441,12 @@ The exact set of URIs is whatever skills are embedded in the binary at build tim
   **Orient → Explore → Risks → Wrap-up** — where Explore loops as many passes as the
   codebase warrants (no fixed step count), with per-move pausing and a phase checklist
   instead of an `N/total` indicator. The second is the **unchanged** rendered
-  `codebase-walkthrough` skill as the analysis engine. A client that surfaces
+  `onboard-codebase-walkthrough` skill as the analysis engine. A client that surfaces
   `/onboard` therefore runs the walkthrough as a paced wizard rather than receiving it
   all at once. When `direction` is supplied, the conductor is prefixed with a note to
   skip the opening direction question.
+- **Name:** `onboard-skills`
+- **Arguments:** none.
+- **Returns:** a compact catalog of the shipped `onboard-*` skills, what each owns, and an
+  example user prompt. This is the discoverability surface for users who know onboard is
+  installed but do not remember which workflows it ships.

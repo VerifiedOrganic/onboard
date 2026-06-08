@@ -20,7 +20,7 @@ type listSkillsOutput struct {
 }
 
 type getSkillInput struct {
-	Name string `json:"name" jsonschema:"the skill name to load, e.g. codebase-walkthrough"`
+	Name string `json:"name" jsonschema:"the skill name to load, e.g. onboard-codebase-walkthrough"`
 }
 
 type getSkillOutput struct {
@@ -46,7 +46,7 @@ func registerSkillTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "get_skill",
-		Description: "Return the full content of an embedded skill (SKILL.md plus all reference files). Call this to load the codebase-walkthrough workflow before onboarding a developer.",
+		Description: "Return the full content of an embedded skill (SKILL.md plus all reference files). Call this to load the onboard-codebase-walkthrough workflow before onboarding a developer.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in getSkillInput) (*mcp.CallToolResult, getSkillOutput, error) {
 		sk, err := skills.Get(in.Name)
 		if err != nil {

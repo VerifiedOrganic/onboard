@@ -68,15 +68,15 @@ func TestIntegrationResourcesAndPrompts(t *testing.T) {
 	}
 	var hasWalkthrough bool
 	for _, r := range rl.Resources {
-		if r.URI == "onboard://skills/codebase-walkthrough" {
+		if r.URI == "onboard://skills/onboard-codebase-walkthrough" {
 			hasWalkthrough = true
 		}
 	}
 	if !hasWalkthrough {
-		t.Error("codebase-walkthrough skill resource not advertised")
+		t.Error("onboard-codebase-walkthrough skill resource not advertised")
 	}
 
-	rr, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{URI: "onboard://skills/codebase-walkthrough"})
+	rr, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{URI: "onboard://skills/onboard-codebase-walkthrough"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,14 +88,20 @@ func TestIntegrationResourcesAndPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var onboard *mcp.Prompt
+	var onboard, onboardSkills *mcp.Prompt
 	for _, p := range pl.Prompts {
 		if p.Name == "onboard" {
 			onboard = p
 		}
+		if p.Name == "onboard-skills" {
+			onboardSkills = p
+		}
 	}
 	if onboard == nil {
 		t.Fatal("onboard prompt not advertised")
+	}
+	if onboardSkills == nil {
+		t.Fatal("onboard-skills prompt not advertised")
 	}
 	// The tour advertises an optional `direction` argument so clients that collect
 	// prompt arguments can preselect inside-out / outside-in.
@@ -141,6 +147,20 @@ func TestIntegrationResourcesAndPrompts(t *testing.T) {
 	}
 	if pre := promptText(t, gpDir.Messages[0]); !strings.Contains(pre, "Preselected direction: **inside-out**") {
 		t.Errorf("preselected direction not normalized/honored, conductor began: %.80q", pre)
+	}
+
+	gpCatalog, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{Name: "onboard-skills"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gpCatalog.Messages) != 1 {
+		t.Fatalf("onboard-skills prompt returned %d messages, want 1", len(gpCatalog.Messages))
+	}
+	catalog := promptText(t, gpCatalog.Messages[0])
+	for _, marker := range []string{"Onboard Skill Catalog", "onboard-codebase-walkthrough", "onboard-dependency-impact-analyzer"} {
+		if !strings.Contains(catalog, marker) {
+			t.Errorf("onboard-skills catalog missing %q", marker)
+		}
 	}
 }
 
@@ -205,9 +225,13 @@ func TestIntegrationToolCalls(t *testing.T) {
 		Name    string `json:"name"`
 		Content string `json:"content"`
 	}
-	callStructured(ctx, t, cs, "get_skill", map[string]any{"name": "codebase-walkthrough"}, &skill)
+	callStructured(ctx, t, cs, "get_skill", map[string]any{"name": "onboard-codebase-walkthrough"}, &skill)
 	if !strings.Contains(skill.Content, "Phase 1") {
 		t.Error("get_skill content missing expected text")
+	}
+	callStructured(ctx, t, cs, "get_skill", map[string]any{"name": "codebase-walkthrough"}, &skill)
+	if skill.Name != "onboard-codebase-walkthrough" {
+		t.Errorf("legacy get_skill alias returned %q", skill.Name)
 	}
 
 	// trace_flow + impact: minimal args (the omitempty fix path)

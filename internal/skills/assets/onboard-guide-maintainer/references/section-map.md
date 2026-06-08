@@ -80,7 +80,7 @@ Run the smallest set of `onboard:` analyses the delta justifies. Scope comes fro
 
 - **`onboard:recon(root)`** — only when structure shifted: a new or removed top-level dir, a new/changed manifest or framework config, or a new entry point. It refreshes stack / directory map / entry points / tooling. It is a phase-1 structural scan that reads no source beyond manifests, so it is cheap — but it is keyed to the repo root and is whole-repo by design; do not expect to aim it at a subtree. A logic-only edit inside an existing file does NOT need recon.
 - **`onboard:trace_flow(entry, depth?, root?)`** — when a traced flow's functions were edited, or a new handler/route/entry appeared. Re-walk that ONE flow from its entry symbol to refresh the matching Request Lifecycle trace. The entry you pass *is* the scope; do not re-trace flows the delta did not touch.
-- **`onboard:impact(symbol, root?)`** — when a widely-used symbol or a schema/contract changed and you need to know whether the blast radius reaches what Risks or Request Lifecycle describe. It returns direct/transitive callers and at-risk tests. Use it to decide whether a downstream section needs a note — not to author a standalone impact report (that is the `dependency-impact-analyzer` skill's job).
+- **`onboard:impact(symbol, root?)`** — when a widely-used symbol or a schema/contract changed and you need to know whether the blast radius reaches what Risks or Request Lifecycle describe. It returns direct/transitive callers and at-risk tests. Use it to decide whether a downstream section needs a note — not to author a standalone impact report (that is the `onboard-dependency-impact-analyzer` skill's job).
 
 When only test files changed, you typically revisit only the Behavioral Map. When only docs/comments changed, the guide may not move at all.
 
@@ -101,7 +101,7 @@ If the change set is large (roughly >40 files), do not read everything blindly:
 1. Group `changed` by directory / subsystem.
 2. Prioritize high-signal groups: entry points, routing, core domain logic, schema/migrations, public API surface.
 3. Deprioritize low-signal churn: lockfiles, generated code, fixtures, vendored deps, formatting-only sweeps. These rarely move a guide section.
-4. If a single subsystem was rewritten wholesale, consider telling the user that a full regenerate of that section (via the `codebase-walkthrough` skill) may be cleaner than a patch — but still keep the rest of the guide intact.
+4. If a single subsystem was rewritten wholesale, consider telling the user that a full regenerate of that section (via the `onboard-codebase-walkthrough` skill) may be cleaner than a patch — but still keep the rest of the guide intact.
 
 ## Syntactic-edge honesty
 

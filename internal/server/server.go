@@ -29,7 +29,7 @@ func New(version string) *mcp.Server {
 	registerRoutesTool(s)      // routes — HTTP API surface from framework patterns
 	registerMapTool(s)         // render_map — interactive HTML / static Mermaid map
 	registerSkillResources(s)  // onboard://skills/* — for clients that read resources
-	registerPrompt(s)          // /onboard prompt — for clients that surface prompts
+	registerPrompt(s)          // /onboard prompts — for clients that surface prompts
 
 	return s
 }

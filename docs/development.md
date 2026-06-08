@@ -78,9 +78,9 @@ installer, and `internal/guide/` + `internal/git/` are the guide cache.
 5. Add tests using the in-memory transport pattern (see existing `*_test.go`).
 
 ### A new skill
-See [skills.md](skills.md#adding-a-skill). Drop a bundle under
-`internal/skills/assets/<name>/`; it auto-gains a `get_skill` entry and a resource. Mind
-the plain-scalar frontmatter rule.
+See [skills.md](skills.md#adding-a-skill). Drop a namespaced bundle under
+`internal/skills/assets/onboard-<name>/`; it auto-gains a `get_skill` entry and a resource.
+Mind the plain-scalar frontmatter rule.
 
 ### A new agent target
 Add an `Agent{Name, SkillsDir, ConfigPath, Shape}` to `Registry()` in

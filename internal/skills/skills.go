@@ -25,7 +25,7 @@ var assets embed.FS
 type Skill struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	dir         string // path within the embedded FS, e.g. "assets/codebase-walkthrough"
+	dir         string // path within the embedded FS, e.g. "assets/onboard-codebase-walkthrough"
 }
 
 // List enumerates every embedded skill. Each subdirectory of assets/ that holds a
@@ -55,8 +55,10 @@ func List() ([]Skill, error) {
 	return out, nil
 }
 
-// Get returns a single embedded skill by name.
+// Get returns a single embedded skill by name. Legacy unprefixed names are accepted for
+// compatibility, but List advertises the namespaced onboard-* identifiers.
 func Get(name string) (Skill, error) {
+	name = CanonicalName(name)
 	all, err := List()
 	if err != nil {
 		return Skill{}, err

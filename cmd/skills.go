@@ -12,16 +12,21 @@ var skillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "List the skills embedded in this binary",
 	RunE: func(_ *cobra.Command, _ []string) error {
-		all, err := skills.List()
+		catalog, err := skills.Catalog()
 		if err != nil {
 			return err
 		}
-		if len(all) == 0 {
+		if len(catalog) == 0 {
 			fmt.Println("No embedded skills found.")
 			return nil
 		}
-		for _, s := range all {
-			fmt.Printf("• %s\n  %s\n", s.Name, truncate(s.Description, 110))
+		fmt.Println("Onboard skills")
+		fmt.Println("Use `/onboard` for the guided tour, or `/onboard-skills` to show this catalog in an MCP client.")
+		for _, s := range catalog {
+			fmt.Printf("\n• %s\n  %s\n", s.Name, truncate(s.Summary, 110))
+			if s.Try != "" {
+				fmt.Printf("  Try: %s\n", s.Try)
+			}
 		}
 		return nil
 	},

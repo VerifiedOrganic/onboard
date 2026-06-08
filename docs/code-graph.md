@@ -326,7 +326,7 @@ exception, `routes`, noted below).
 - **`trace_flow` `format="mermaid"`** — renders a discovered trace as a `sequenceDiagram`
   (one message per in-trace edge, in breadth-first order — reach, not strict runtime order).
 
-These exist to **ground the architecture-cartographer**: it can now build a dependency graph,
+These exist to **ground the onboard-architecture-cartographer**: it can now build a dependency graph,
 ERD, API map, or sequence diagram from extracted facts instead of asking the model to guess.
 
 ---

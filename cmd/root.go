@@ -45,8 +45,8 @@ var rootCmd = &cobra.Command{
 	Long: `onboard is a single static binary that walks developers through a codebase —
 architecture, data flow, end-to-end traces, and the risky negative space.
 
-It embeds the codebase-walkthrough skill and serves it to any MCP-capable agent
-(Claude Code, Grok, Codex, opencode, Cursor) and to headless/CI use.
+It embeds namespaced onboard-* skills and serves them to any MCP-capable agent
+(Claude Code, Grok, Codex, opencode, Cursor, Copilot CLI, Junie CLI) and to headless/CI use.
 
   onboard serve              run the MCP server over stdio
   onboard install --all      wire it into every detected agent

@@ -1,6 +1,6 @@
 # Installation & agent integration
 
-Five agents. Three config formats. One of them (looking at you, opencode) in a genre of
+Seven agents. Four config formats. One of them (looking at you, opencode) in a genre of
 its own. This is the page that explains how `onboard install` keeps all of that straight so
 you never have to hand-edit a TOML table at midnight.
 
@@ -26,7 +26,7 @@ touching a thing.
 ```
 onboard serve                 run the MCP server over stdio (what agents launch)
 onboard serve --http :8080    run over Streamable HTTP at /mcp instead
-onboard install --agent NAME  install into one agent (claude|codex|grok|opencode|cursor)
+onboard install --agent NAME  install into one agent (claude|codex|grok|opencode|cursor|copilot|junie)
 onboard install --all         install into every detected agent
 onboard init                  convenience wrapper: detect agents and install into each
 onboard doctor                verify each install; --agent NAME to check just one (read-only)
@@ -50,7 +50,7 @@ After installing, **restart the agent** so it picks up the new MCP server and sk
 
 ## The agent matrix
 
-Five agents, three config shapes. The shapes genuinely differ — the installer encodes
+Seven agents, four config shapes. The shapes genuinely differ — the installer encodes
 each one (`Shape` in `agents.go`):
 
 | Agent | Skills dir | Config file | Shape | Server entry |
@@ -60,6 +60,8 @@ each one (`Shape` in `agents.go`):
 | **Grok** (xAI Build CLI) | `~/.grok/skills/` | `~/.grok/config.toml` | TOML `mcp_servers` | `[mcp_servers.onboard]` `command`/`args` |
 | **opencode** | `~/.config/opencode/skills/` | `~/.config/opencode/opencode.json` | JSON `mcp` (outlier) | `{"type":"local", "command":[BIN,"serve"], "enabled":true, "environment":{}}` |
 | **Cursor** | `~/.cursor/skills/` | `~/.cursor/mcp.json` | JSON `mcpServers` | `{"command": BIN, "args": ["serve"]}` |
+| **GitHub Copilot CLI** | `~/.copilot/skills/` | `~/.copilot/mcp-config.json` | JSON `mcpServers` + tools | `{"type":"local", "command": BIN, "args": ["serve"], "tools": ["*"]}` |
+| **Junie CLI** | `~/.junie/skills/` | `~/.junie/mcp/mcp.json` | JSON `mcpServers` | `{"command": BIN, "args": ["serve"]}` |
 
 Notable shape differences:
 - **Codex / Grok** use a snake_case TOML table `[mcp_servers.<name>]`, *not* `mcpServers`.
@@ -69,6 +71,11 @@ Notable shape differences:
   (not `env`), with `type: "local"` required.
 - **Codex honors `CODEX_HOME`** — the installer resolves the codex paths against it when
   set.
+- **Copilot honors `COPILOT_HOME`** — the installer resolves Copilot CLI paths against it
+  when set. Copilot also requires a `tools` allowlist for local MCP servers, so onboard
+  writes `tools: ["*"]`.
+- **Junie uses nested MCP config** at `~/.junie/mcp/mcp.json`; its skills live directly
+  under `~/.junie/skills/`.
 - **Grok ships in two flavors.** The xAI Grok Build CLI uses TOML at
   `~/.grok/config.toml`; the npm `grok-cli` uses JSON at `~/.grok/user-settings.json`. The
   registry prefers TOML and only falls back to the JSON variant if the JSON file exists
@@ -92,6 +99,10 @@ The installer is written to never damage a config it doesn't understand
   often hold tokens at `0600`); new files default to `0600`, not world-readable.
 - **Path-escape guard.** Skill names containing `/`, `\`, or `..` are skipped so a name
   can't escape the skills directory.
+- **Legacy skill cleanup.** When upgrading from pre-`onboard-*` skill names, `install` and
+  `init` remove old unprefixed onboard skill directories only after the replacement
+  namespaced directory exists and the old `SKILL.md` still matches the known onboard
+  bundle. Custom directories with similar names are left alone.
 
 ## Manual / hosted setup
 

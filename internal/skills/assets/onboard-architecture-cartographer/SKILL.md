@@ -1,6 +1,6 @@
 ---
-name: architecture-cartographer
-description: Draws durable, committable diagram-as-code (Mermaid) of a codebase's architecture — C4 context/container/component diagrams, flowcharts for request and job flows, erDiagram for database schemas, and package/module dependency graphs. Use when someone says "draw a diagram", "draw an architecture diagram", "map the architecture", "give me a mermaid diagram", "generate a dependency graph", "draw the ERD", "diagram the database schema", or "diagram the request flow", or wants a static visual artifact they can commit and render on GitHub or in docs. Produces Mermaid source plus a legend mapping every node to a real file or directory; edges come from the onboard code graph and unconfirmable edges are drawn dashed and labeled inferred. NOT the interactive clickable HTML map or the teaching walkthrough (both codebase-walkthrough), NOT per-change blast radius (dependency-impact-analyzer), NOT a risk register (test-gap-and-risk-auditor), NOT the cached-guide update loop (guide-maintainer).
+name: onboard-architecture-cartographer
+description: Draws durable, committable Mermaid diagrams of a codebase architecture — C4/context/container/component diagrams, request/job flowcharts, ERDs, and package/module dependency graphs. Use when someone says "draw a diagram", "draw an architecture diagram", "map the architecture", "give me a mermaid diagram", "generate a dependency graph", "draw the ERD", "diagram the database schema", or "diagram the request flow", or wants a static visual artifact they can commit. Produces Mermaid plus a legend mapping nodes to real files; inferred edges are dashed. NOT interactive HTML map or teaching walkthrough (onboard-codebase-walkthrough), NOT per-change blast radius (onboard-dependency-impact-analyzer), NOT risk register (onboard-test-gap-and-risk-auditor), NOT cached-guide delta loop (onboard-guide-maintainer).
 ---
 
 # Architecture Cartographer
@@ -12,9 +12,9 @@ The bar for "done": a reviewer who has never seen the repo can read the diagram 
 ## What this skill is and is NOT
 
 - This skill **draws static diagram-as-code**. Output is committable text — Mermaid `flowchart`, `C4Context`/`C4Container`/`C4Component`, `erDiagram`, dependency graph — plus a legend. It lives in the repo and renders anywhere Mermaid renders.
-- It is **NOT** the interactive clickable HTML map. Pan/zoom, detail panels, in-browser click-through belong to **codebase-walkthrough**'s interactive-map mode. If the user wants to *click around and explore*, route them there.
-- It is **NOT** a phase-by-phase teaching walkthrough. If the user wants to *understand the whole codebase* conversationally, that is **codebase-walkthrough** too.
-- It is **NOT** a per-change blast-radius report (**dependency-impact-analyzer**), a whole-repo risk register (**test-gap-and-risk-auditor**), or the cached-guide delta loop (**guide-maintainer**).
+- It is **NOT** the interactive clickable HTML map. Pan/zoom, detail panels, in-browser click-through belong to **onboard-codebase-walkthrough**'s interactive-map mode. If the user wants to *click around and explore*, route them there.
+- It is **NOT** a phase-by-phase teaching walkthrough. If the user wants to *understand the whole codebase* conversationally, that is **onboard-codebase-walkthrough** too.
+- It is **NOT** a per-change blast-radius report (**onboard-dependency-impact-analyzer**), a whole-repo risk register (**onboard-test-gap-and-risk-auditor**), or the cached-guide delta loop (**onboard-guide-maintainer**).
 
 Litmus test: "help me understand X" → walkthrough. "draw / diagram / map X as an artifact I keep" → you are in the right place.
 
@@ -69,7 +69,7 @@ Edges are the part people get wrong, so source them, do not guess. For several d
 - The auto-derived dependency map is import-based, which is steadier than call resolution, but it is still syntactic — conditional, generated, or reflectively-loaded imports can be missed or spurious.
 - If you draw an edge you could not confirm in the graph (e.g. "the queue worker eventually writes the DB," inferred from naming), **mark it inferred** — see Step 4.
 
-Do not reach for `onboard:impact` here — per-change blast radius is **dependency-impact-analyzer**'s job, not cartography.
+Do not reach for `onboard:impact` here — per-change blast radius is **onboard-dependency-impact-analyzer**'s job, not cartography.
 
 ## Step 3 — Reduce to a legible diagram (5–12 nodes)
 
@@ -112,7 +112,7 @@ Use a dashed link (`A -.-> B`) for any inferred edge and call it out in the lege
 - **Reduce ruthlessly.** 5–12 named nodes. If it does not fit, split it; never cram.
 - **Every node is a real path.** No node ships without a legend entry pointing at a file or directory.
 - **Graph edges, honestly labeled.** Solid = present in the code graph; dashed = inferred. Never present a syntactic match as proof.
-- **Diagram-as-code, meant to be committed.** Plain Mermaid the user owns and version-controls — not an interactive HTML toy (that is codebase-walkthrough's job).
+- **Diagram-as-code, meant to be committed.** Plain Mermaid the user owns and version-controls — not an interactive HTML toy (that is onboard-codebase-walkthrough's job).
 - **Keep the user independent.** A good diagram plus legend lets them update it themselves the next time the code moves.
 
 ## Reference files

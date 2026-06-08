@@ -144,7 +144,7 @@ flowchart LR
     repo --> db[("internal/db")]
 ```
 
-The auto-derived edges are import-based — steadier than call resolution but still syntactic, so generated or conditionally-loaded imports may be missed. A cycle in this graph is worth surfacing to the user (it usually signals a leaky boundary), but stay descriptive: this skill draws, it does not audit (auditing is test-gap-and-risk-auditor).
+The auto-derived edges are import-based — steadier than call resolution but still syntactic, so generated or conditionally-loaded imports may be missed. A cycle in this graph is worth surfacing to the user (it usually signals a leaky boundary), but stay descriptive: this skill draws, it does not audit (auditing is onboard-test-gap-and-risk-auditor).
 
 ## Inferred-edge convention
 

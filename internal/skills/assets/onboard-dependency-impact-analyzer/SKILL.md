@@ -1,6 +1,6 @@
 ---
-name: dependency-impact-analyzer
-description: Computes the blast radius of one proposed code change before you edit — the direct callers, the full transitive caller set, the downstream callees the target itself relies on, and exactly which tests are at risk, then turns that into an actionable change plan with an honest fact-vs-assumption split. Use this skill for a single targeted change to one function, file, endpoint, schema, or field, whenever the user asks "what breaks if I change X", "what depends on this", "who calls this function", "is it safe to rename Y", "is it safe to delete Y", "what is the blast radius of changing Z", "what will this refactor affect", or "who uses this endpoint/field". Per-change impact only; for a whole-repo standing risk register use test-gap-and-risk-auditor, for durable diagrams use architecture-cartographer.
+name: onboard-dependency-impact-analyzer
+description: Computes the blast radius of one proposed code change before you edit — the direct callers, the full transitive caller set, the downstream callees the target itself relies on, and exactly which tests are at risk, then turns that into an actionable change plan with an honest fact-vs-assumption split. Use this skill for a single targeted change to one function, file, endpoint, schema, or field, whenever the user asks "what breaks if I change X", "what depends on this", "who calls this function", "is it safe to rename Y", "is it safe to delete Y", "what is the blast radius of changing Z", "what will this refactor affect", or "who uses this endpoint/field". Per-change impact only; for a whole-repo standing risk register use onboard-test-gap-and-risk-auditor, for durable diagrams use onboard-architecture-cartographer.
 ---
 
 # Dependency Impact Analyzer
@@ -9,7 +9,7 @@ Before you change one thing, know what else moves. This skill takes a single pro
 
 This is the skill that most justifies a real code-graph backend. Grep tells you where a name *appears*; the code graph tells you who actually *calls* it and how far the ripple travels. But that graph is syntactic — it resolves edges by name and lexical scope, not by type or runtime wiring — so the second half of this skill's job is naming the coupling the graph is blind to. **Map the ripple before you make the cut.**
 
-Scope: one target, one change, before the edit. For a standing, whole-repository risk register (untested paths, fragile seams across the entire codebase) that is `test-gap-and-risk-auditor`; for durable committed diagrams-as-code that is `architecture-cartographer`. This skill is per-change and targeted — stay in that lane.
+Scope: one target, one change, before the edit. For a standing, whole-repository risk register (untested paths, fragile seams across the entire codebase) that is `onboard-test-gap-and-risk-auditor`; for durable committed diagrams-as-code that is `onboard-architecture-cartographer`. This skill is per-change and targeted — stay in that lane.
 
 ## Step 0 — Pin the target and the change
 
@@ -79,7 +79,7 @@ Label the change's severity so the user knows how much ceremony it needs — **C
 - **Facts carry their source; assumptions are labeled as such.** "Likely 7 callers (`onboard:impact`)" is honest; "exactly 7 callers" is a claim the syntactic graph cannot back.
 - **Read back `matched_symbol`; honor `candidates`.** The tool analyzes one definition and tells you when it had to choose. An ambiguous target is a finding, not a footnote.
 - **Zero callers is an answer.** It means dead code or dynamic reach — decide which and say so.
-- **One target, before the edit.** Whole-repo risk is `test-gap-and-risk-auditor`'s job; durable diagrams are `architecture-cartographer`'s. Stay in your lane.
+- **One target, before the edit.** Whole-repo risk is `onboard-test-gap-and-risk-auditor`'s job; durable diagrams are `onboard-architecture-cartographer`'s. Stay in your lane.
 - **Leave the user able to verify it themselves** — the plan ends with the exact tests and commands, so they do not need you to re-run the analysis next time.
 
 ## Reference files

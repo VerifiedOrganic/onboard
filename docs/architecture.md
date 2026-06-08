@@ -73,7 +73,7 @@ flowchart TD
     srv --> mapTool["tools_map.go + map_render.go<br/>render_map"]
     srv --> guideTools["tools_guide.go<br/>guide_read/write/delta"]
     srv --> resources["resources.go<br/>onboard://skills/*"]
-    srv --> prompt["prompts.go<br/>/onboard prompt"]
+    srv --> prompt["prompts.go<br/>/onboard prompts"]
 
     graphTools --> idx["graph_index.go<br/>shared cache + indexGraph"]
     extractors --> idx
@@ -110,7 +110,7 @@ flowchart TD
 | `internal/providers/` | The code-graph engine: the `Provider` interface, the `Builtin` tree-sitter provider, the `Null` regex fallback, the `Graph`/`Symbol` model with name+scope resolution, PageRank ranking (`pagerank.go`), and opt-in semantic precision layers for Go (`goprecision.go`) and Rust (`rustprecision.go`). |
 | `internal/guide/` | The durable, SHA-tagged guide cache: path resolution, header format, read/write. |
 | `internal/git/` | Thin wrappers over the `git` CLI: availability, common-dir, HEAD SHA, branch, `diff --name-status`, and per-file churn/ownership history. |
-| `internal/agents/` | The installer: the agent registry/detection (`agents.go`) and the never-clobber JSON/TOML MCP-config writers (`agent_config.go`), for five agents. |
+| `internal/agents/` | The installer: the agent registry/detection (`agents.go`) and the never-clobber JSON/TOML MCP-config writers (`agent_config.go`), for seven agents. |
 | `internal/ignore/` | Single source of truth for the dependency/build directories that code-walking tools skip. |
 | `docs/` | This documentation. |
 
@@ -123,11 +123,12 @@ is exposed three ways (`internal/server/server.go`):
 |---------|-----------|---------|
 | `list_skills` / `get_skill` | MCP **tools** | every client (tools are universal) |
 | `onboard://skills/<name>` | MCP **resources** | clients that read resources |
-| `/onboard` | MCP **prompt** | clients that surface prompts |
+| `/onboard`, `/onboard-skills` | MCP **prompts** | clients that surface prompts |
 
-The prompt and the `onboard://skills/codebase-walkthrough` resource both return the same
-rendered `codebase-walkthrough` content; the prompt wraps it as a user-role message so a
-client drops straight into the walkthrough workflow.
+The `/onboard` prompt and the `onboard://skills/onboard-codebase-walkthrough` resource
+both return the same rendered `onboard-codebase-walkthrough` content; the prompt wraps it
+as a user-role message so a client drops straight into the walkthrough workflow.
+`/onboard-skills` is the catalog prompt for discovering the rest of the suite.
 
 ## Request lifecycle (server mode)
 

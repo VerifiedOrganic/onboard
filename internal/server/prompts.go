@@ -20,7 +20,7 @@ var tourConductor string
 
 // registerPrompt exposes /onboard as a slash command for clients that surface MCP
 // prompts. It returns a guided *tour*: the conductor protocol (direction fork +
-// stepping) followed by the unchanged codebase-walkthrough skill as the analysis
+// stepping) followed by the unchanged onboard-codebase-walkthrough skill as the analysis
 // engine, so the agent runs the walkthrough phase-by-phase as a wizard rather than
 // dumping it all at once.
 func registerPrompt(s *mcp.Server) {
@@ -33,7 +33,7 @@ func registerPrompt(s *mcp.Server) {
 			Required:    false,
 		}},
 	}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-		sk, err := skills.Get("codebase-walkthrough")
+		sk, err := skills.Get("onboard-codebase-walkthrough")
 		if err != nil {
 			return nil, err
 		}
@@ -54,6 +54,23 @@ func registerPrompt(s *mcp.Server) {
 			Messages: []*mcp.PromptMessage{
 				{Role: "user", Content: &mcp.TextContent{Text: conductor}},
 				{Role: "user", Content: &mcp.TextContent{Text: engine}},
+			},
+		}, nil
+	})
+
+	s.AddPrompt(&mcp.Prompt{
+		Name:        "onboard-skills",
+		Description: "Show the onboard skill catalog, including the namespaced onboard-* skill names and example prompts for each workflow.",
+	}, func(_ context.Context, _ *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		catalog, err := skills.CatalogMarkdown()
+		if err != nil {
+			return nil, err
+		}
+		text := "Show the user this catalog of onboard workflows. Keep it concise, and if they pick one, route to the named skill or call `get_skill` with that exact name.\n\n" + catalog
+		return &mcp.GetPromptResult{
+			Description: "Onboard skill catalog",
+			Messages: []*mcp.PromptMessage{
+				{Role: "user", Content: &mcp.TextContent{Text: text}},
 			},
 		}, nil
 	})

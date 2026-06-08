@@ -1,6 +1,6 @@
 ---
-name: test-gap-and-risk-auditor
-description: Produces a standing, whole-codebase risk register of the negative space — reachable-but-untested code paths, unhandled error paths, fragile integration seams, and silent assumptions baked in by fast or AI-driven builds, each ranked by severity with a file:line location and a concrete mitigation. Use when someone asks "what's untested", "where is the risk", "find the fragile parts", "what are the coverage gaps", "audit the codebase for risk", "what could break", "where are the weak spots", "what did the AI build leave unsafe", or wants a whole-repo risk and coverage audit rather than the blast radius of one specific change. Drives the audit with onboard:recon, onboard:trace_flow, and onboard:impact, crossing the reachable call graph against the test set. Not a teaching walkthrough (that is codebase-walkthrough) and not a per-change impact analysis (that is dependency-impact-analyzer).
+name: onboard-test-gap-and-risk-auditor
+description: Produces a standing, whole-codebase risk register of the negative space — reachable-but-untested code paths, unhandled error paths, fragile integration seams, and silent assumptions baked in by fast or AI-driven builds, each ranked by severity with a file:line location and a concrete mitigation. Use when someone asks "what's untested", "where is the risk", "find the fragile parts", "what are the coverage gaps", "audit the codebase for risk", "what could break", "where are the weak spots", "what did the AI build leave unsafe", or wants a whole-repo risk and coverage audit rather than the blast radius of one specific change. Drives the audit with onboard:recon, onboard:trace_flow, and onboard:impact, crossing the reachable call graph against the test set. Not a teaching walkthrough (that is onboard-codebase-walkthrough) and not a per-change impact analysis (that is onboard-dependency-impact-analyzer).
 ---
 
 # Test-Gap and Risk Auditor
@@ -9,7 +9,7 @@ Produce a **standing risk register** for an entire codebase: a ranked list of wh
 
 This audit hunts the **negative space**: code that runs but is never tested, errors that are never handled, integration seams where two sides quietly disagree, and assumptions a fast or AI-driven build baked in without ever stating them. Modern codebases arrive faster than anyone can vet them; this skill is the standing vetting pass.
 
-**Scope discipline.** This is *whole-repo and standing* — "audit the codebase," "what's untested," "where's the risk." If the user instead asks "what breaks if I change *this one* function/file/endpoint/schema," that is the **dependency-impact-analyzer** skill's per-change blast radius — hand it off. If they want to be *taught* the codebase, that's **codebase-walkthrough**. If they want a committed diagram, that's **architecture-cartographer**. Stay in your lane: you *rank risk*, you do not re-teach the code or draw its maps.
+**Scope discipline.** This is *whole-repo and standing* — "audit the codebase," "what's untested," "where's the risk." If the user instead asks "what breaks if I change *this one* function/file/endpoint/schema," that is the **onboard-dependency-impact-analyzer** skill's per-change blast radius — hand it off. If they want to be *taught* the codebase, that's **onboard-codebase-walkthrough**. If they want a committed diagram, that's **onboard-architecture-cartographer**. Stay in your lane: you *rank risk*, you do not re-teach the code or draw its maps.
 
 ## The honesty contract (read first)
 
@@ -73,7 +73,7 @@ Assemble every finding into one **prioritized risk register**, highest severity 
 - **Negative space is the product.** What *isn't* there — coverage, error handling, a stated assumption, a justified boundary — is the highest-value thing you surface.
 - **Every claim is "likely."** Syntactic edges suggest; they don't prove. Surface the ceiling on every reachability and coverage claim.
 - **Rank ruthlessly.** An unranked list of 40 risks is noise. Severity × centrality × danger, top finding first.
-- **Standing, not per-change.** Audit the whole repo as it stands; per-change blast radius belongs to dependency-impact-analyzer — hand it off cleanly.
+- **Standing, not per-change.** Audit the whole repo as it stands; per-change blast radius belongs to onboard-dependency-impact-analyzer — hand it off cleanly.
 - **Actionable or it doesn't ship.** Every finding carries a concrete mitigation and a real `file:line`. "Add a test for the 4xx branch of `chargeCard` at billing.go:142" beats "improve coverage."
 - **Keep the user independent.** Teach the *pattern* of each gap so they catch the next one, not just this instance.
 

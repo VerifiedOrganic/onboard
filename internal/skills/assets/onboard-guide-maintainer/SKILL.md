@@ -1,6 +1,6 @@
 ---
-name: guide-maintainer
-description: Runs the delta-update maintenance loop that reconciles an already-generated, git-SHA-tagged codebase guide with current HEAD, re-reading and rewriting only the sections fed by changed files instead of rescanning the whole repo via onboard:guide_read, onboard:guide_delta, and onboard:guide_write. Use when the user says "update the guide", "refresh the codebase guide", "sync the guide", "the guide is stale", "regenerate the guide after these changes", "bring the guide up to date", or asks to reconcile a cached guide with new commits. Requires git. Not first-time guide authoring (use codebase-walkthrough), not committed Mermaid diagrams (architecture-cartographer), not whole-repo risk auditing (test-gap-and-risk-auditor), and not one-target blast-radius analysis (dependency-impact-analyzer).
+name: onboard-guide-maintainer
+description: Runs the delta-update maintenance loop that reconciles an already-generated, git-SHA-tagged codebase guide with current HEAD, re-reading and rewriting only the sections fed by changed files instead of rescanning the whole repo via onboard:guide_read, onboard:guide_delta, and onboard:guide_write. Use when the user says "update the guide", "refresh the codebase guide", "sync the guide", "the guide is stale", "regenerate the guide after these changes", "bring the guide up to date", or asks to reconcile a cached guide with new commits. Requires git. Not first-time guide authoring (use onboard-codebase-walkthrough), not committed Mermaid diagrams (onboard-architecture-cartographer), not whole-repo risk auditing (onboard-test-gap-and-risk-auditor), and not one-target blast-radius analysis (onboard-dependency-impact-analyzer).
 ---
 
 # Guide Maintainer
@@ -9,17 +9,17 @@ Keep an existing durable codebase guide current with the code, cheaply, by updat
 
 The discipline is a good code review's: touch the minimum. A delta update reads only the files that changed since the cached SHA, re-runs analysis only where those files reach, and rewrites only the guide sections they feed. Everything unchanged is preserved verbatim.
 
-**Hard requirement: this needs git.** The guide is tagged with the HEAD SHA it was generated against, and the delta is a diff between that SHA and current HEAD. With no git history there is no SHA to diff from — say so and hand off to first-time authoring (`codebase-walkthrough`).
+**Hard requirement: this needs git.** The guide is tagged with the HEAD SHA it was generated against, and the delta is a diff between that SHA and current HEAD. With no git history there is no SHA to diff from — say so and hand off to first-time authoring (`onboard-codebase-walkthrough`).
 
 ## When this is the right skill
 
 Use it when the user says "update / refresh / sync the guide", "the guide is stale", "regenerate the guide after these changes", "bring the guide up to date", or otherwise asks to reconcile an already-cached guide with new code.
 
 Do NOT use it to:
-- **Author a guide from scratch** — that is `codebase-walkthrough` (cached-guide mode). If `guide_read` reports no guide exists, hand off there.
-- **Draw committable Mermaid diagrams** — `architecture-cartographer`.
-- **Audit the whole repo for risk** — `test-gap-and-risk-auditor`.
-- **Compute the blast radius of one change as a standalone report** — `dependency-impact-analyzer`.
+- **Author a guide from scratch** — that is `onboard-codebase-walkthrough` (cached-guide mode). If `guide_read` reports no guide exists, hand off there.
+- **Draw committable Mermaid diagrams** — `onboard-architecture-cartographer`.
+- **Audit the whole repo for risk** — `onboard-test-gap-and-risk-auditor`.
+- **Compute the blast radius of one change as a standalone report** — `onboard-dependency-impact-analyzer`.
 
 You own `guide_read` / `guide_delta` / `guide_write` and the delta loop between them. Nothing else.
 
@@ -28,8 +28,8 @@ You own `guide_read` / `guide_delta` / `guide_write` and the delta loop between 
 ### Step 1 — Read the cached guide and check currency
 Call `onboard:guide_read`. It reports whether a guide `exists`, its `cached_sha`, the `head_sha`, whether it is `current`, and the `body`. Branch:
 
-- **No guide exists** (`exists: false`) → there is nothing to maintain. Tell the user no guide is cached and offer to generate one via `codebase-walkthrough`. Stop.
-- **Result indicates this is not a git repo / there is no SHA to diff from** → delta is impossible. Tell the user delta updates require git, and offer a full regenerate via `codebase-walkthrough`. Stop.
+- **No guide exists** (`exists: false`) → there is nothing to maintain. Tell the user no guide is cached and offer to generate one via `onboard-codebase-walkthrough`. Stop.
+- **Result indicates this is not a git repo / there is no SHA to diff from** → delta is impossible. Tell the user delta updates require git, and offer a full regenerate via `onboard-codebase-walkthrough`. Stop.
 - **`current: true`** (cached SHA == HEAD) → the guide already matches the code. **Do not rescan.** Load the `body` into the conversation, tell the user it is current (cite the `cached_sha`), and stop. Reuse beats rework.
 - **`current: false`** → the guide is stale relative to HEAD. Keep the returned `body` in hand — it is the document you will patch, not replace — and continue to Step 2.
 
@@ -48,7 +48,7 @@ Run only the analyses the delta justifies, and choose each call's scope by **wha
 
 - **Structure shifted** (new/removed top-level dir, new manifest or framework config, new entry point, moved packages) → `onboard:recon` to refresh stack / directory map / entry points. `recon` is a phase-1 structural scan keyed off the repo root — it does not read source beyond manifests, so it is cheap, but it is whole-repo by design; do not expect to point it at a subtree. A pure logic edit inside an existing file does **not** need recon at all.
 - **A traced flow's functions were edited, or a new handler/route appeared** → `onboard:trace_flow` from that one entry symbol to re-walk that single flow. Scope comes from the entry you pass, so trace only the flows the delta actually touched — not every flow in the guide.
-- **A widely-used symbol or a schema/contract changed** → `onboard:impact` on that symbol to see whether its blast radius reaches anything the Risks or Request Lifecycle sections describe. Use it to decide whether a downstream section needs a note — not to author a standalone impact report (that is `dependency-impact-analyzer`'s job).
+- **A widely-used symbol or a schema/contract changed** → `onboard:impact` on that symbol to see whether its blast radius reaches anything the Risks or Request Lifecycle sections describe. Use it to decide whether a downstream section needs a note — not to author a standalone impact report (that is `onboard-dependency-impact-analyzer`'s job).
 
 Skip analyses nothing touched. If only test files changed, you likely only revisit the Behavioral Map. If only a README or comment changed, the guide may not move at all — say so and stop before writing.
 

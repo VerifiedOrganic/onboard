@@ -23,7 +23,7 @@ This is the core split, and it's worth getting straight early.
 
 - **Skills** are the *playbooks* — how to teach a codebase. They're Markdown, embedded in
   the binary, and they encode the method: go top-down, map before code, trust the tests as a
-  spec but verify against the code, and name the negative space. `codebase-walkthrough` is
+  spec but verify against the code, and name the negative space. `onboard-codebase-walkthrough` is
   the headliner; the others handle diagrams, blast radius, a risk register, and guide upkeep.
 - **Tools** are the *facts* — the structural truth a playbook teaches *from*. `recon`,
   `trace_flow`, `impact`, and the rest read your actual code and answer with file names and
@@ -111,11 +111,11 @@ The skills (the playbooks):
 
 | Skill | What it owns |
 |-------|--------------|
-| `codebase-walkthrough` | The top-down tour; the first-time cached guide; the interactive HTML map |
-| `architecture-cartographer` | Committable diagram-as-code (Mermaid: C4 / flow / ERD / deps) |
-| `dependency-impact-analyzer` | The blast radius of one change ("what breaks if I touch X") |
-| `test-gap-and-risk-auditor` | A standing, whole-repo risk register |
-| `guide-maintainer` | The git-SHA delta loop that keeps a cached guide current |
+| `onboard-codebase-walkthrough` | The top-down tour; the first-time cached guide; the interactive HTML map |
+| `onboard-architecture-cartographer` | Committable diagram-as-code (Mermaid: C4 / flow / ERD / deps) |
+| `onboard-dependency-impact-analyzer` | The blast radius of one change ("what breaks if I touch X") |
+| `onboard-test-gap-and-risk-auditor` | A standing, whole-repo risk register |
+| `onboard-guide-maintainer` | The git-SHA delta loop that keeps a cached guide current |
 
 The tools (the facts) are catalogued in [mcp-tools.md](mcp-tools.md); the engine behind them
 is dissected in [code-graph.md](code-graph.md). Ready to use it? [getting-started.md](getting-started.md).

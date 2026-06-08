@@ -12,8 +12,8 @@ ships as **one static Go binary** that is **both an MCP server and a CLI install
 > tools. The whole point of onboard being an MCP server is that *every* agent speaks it, so
 > one binary reaches all of them.
 
-Any MCP-capable agent — Claude Code, Codex, Grok, opencode, Cursor — can launch it, and a
-CI pipeline or custom harness can drive it over HTTP.
+Any MCP-capable agent — Claude Code, Codex, Grok, opencode, Cursor, Copilot CLI,
+Junie CLI — can launch it, and a CI pipeline or custom harness can drive it over HTTP.
 
 It's especially pointed at *fast* and *AI-generated* code — the kind that arrives faster
 than any mental model can form. The walkthrough is as much a **verification** tool as a
@@ -37,6 +37,8 @@ Now **restart your agent** (so it picks up the new server) and type **`/onboard`
 get a guided, stepped tour of whatever repo you're sitting in — you pick the direction
 (start from the entry points and walk *inward*, or from the load-bearing core and work
 *outward*), and it paces itself one move at a time instead of dumping a wall of text.
+Use **`/onboard-skills`** or `onboard skills` when you want the catalog of shipped
+workflows.
 
 Driving it from CI or your own harness instead of an interactive agent? Run it as a server
 and point an **MCP client** at it:
@@ -57,9 +59,10 @@ of the above, with what-you-should-see at each step.
 
 Two halves of one idea — *how* to teach a codebase, and *the facts* to teach from:
 
-- **Skills** — the teaching playbooks, embedded in the binary. `codebase-walkthrough` runs
-  the top-down tour; four siblings cover diagrams, the per-change blast radius, a standing
-  risk register, and keeping a cached guide fresh.
+- **Skills** — the teaching playbooks, embedded in the binary and namespaced as
+  `onboard-*` so they group together in agent skill lists. `onboard-codebase-walkthrough`
+  runs the top-down tour; four siblings cover diagrams, the per-change blast radius, a
+  standing risk register, and keeping a cached guide fresh.
 - **Tools** — 17 MCP tools that turn "where do I even start" into ranked, cited answers:
   `recon` (structural scan), `repo_map` (the load-bearing core, ranked), `trace_flow`
   (follow a flow end to end), `impact` (what breaks if I change this), `context_pack`

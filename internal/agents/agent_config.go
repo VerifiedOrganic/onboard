@@ -18,6 +18,8 @@ func registerMCP(a Agent, binPath string) (string, error) {
 	switch a.Shape {
 	case ShapeJSONMcpServers:
 		return registerJSONMcpServers(a.ConfigPath, binPath)
+	case ShapeJSONMcpServersWithTools:
+		return registerJSONMcpServersWithTools(a.ConfigPath, binPath)
 	case ShapeJSONOpencode:
 		return registerJSONOpencode(a.ConfigPath, binPath)
 	case ShapeTOMLMcpServers:
@@ -110,6 +112,17 @@ func objectField(root map[string]any, key string) (map[string]any, error) {
 // registerJSONMcpServers merges mcpServers.onboard = {command, args} into a JSON
 // config (Claude Code, Cursor, npm grok-cli), preserving other keys.
 func registerJSONMcpServers(path, binPath string) (string, error) {
+	return registerJSONMcpServersEntry(path, binPath, false)
+}
+
+// registerJSONMcpServersWithTools merges mcpServers.onboard = {type, command, args,
+// tools} into JSON configs whose local server entries require an explicit tool allowlist
+// (GitHub Copilot CLI).
+func registerJSONMcpServersWithTools(path, binPath string) (string, error) {
+	return registerJSONMcpServersEntry(path, binPath, true)
+}
+
+func registerJSONMcpServersEntry(path, binPath string, includeTools bool) (string, error) {
 	root, err := loadJSONObject(path)
 	if err != nil {
 		return "", err
@@ -121,10 +134,15 @@ func registerJSONMcpServers(path, binPath string) (string, error) {
 	if _, ok := servers["onboard"]; ok {
 		return "already-present", nil
 	}
-	servers["onboard"] = map[string]any{
+	entry := map[string]any{
 		"command": binPath,
 		"args":    []string{"serve"},
 	}
+	if includeTools {
+		entry["type"] = "local"
+		entry["tools"] = []string{"*"}
+	}
+	servers["onboard"] = entry
 	root["mcpServers"] = servers
 	if err := writeJSONObject(path, root); err != nil {
 		return "", err

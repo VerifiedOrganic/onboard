@@ -189,12 +189,12 @@ more via `gotreesitter`'s 206 embedded grammars.
 ### DECISION
 
 Register the stdio server named **`onboard`** with `command = <abs binary path>`
-and `args = ["serve"]` across all five agents. Four agents share a
-`command`(string) + `args`(array) shape but differ in root key and file format;
+and `args = ["serve"]` across all supported agents. Most JSON agents share a
+`command`(string) + `args`(array) shape but differ in root key and file path;
+**Copilot CLI** additionally requires `tools: ["*"]` for local MCP servers, and
 **opencode is the outlier** that uses a single `command` **array** (binary + args
-merged, no separate `args`). Three use JSON; **Codex and the locally-installed
-Grok use TOML.** All five support MCP and all five have native filesystem skills
-directories.
+merged, no separate `args`). **Codex and the locally-installed Grok use TOML.**
+Supported agents all have native filesystem skills directories.
 
 **Critical discrepancy (corrected per verification):** the locally installed
 "Grok" is **xAI's Grok Build CLI v0.2.3** (TOML config at `~/.grok/config.toml`,
@@ -212,6 +212,8 @@ variant on this machine. Detect which by presence of `~/.grok/config.toml` vs
 | **Grok (xAI Build CLI v0.2.3)** | TOML | `[mcp_servers.onboard]` | `command = BIN` (string), `args = ["serve"]` (array); optional `env`, `headers`, `enabled`, `startup_timeout_sec`, `tool_timeout_sec` | `~/.grok/config.toml` | `.grok/config.toml` (walks cwd→git root; project def **replaces**, not merges) | `~/.grok/skills/` |
 | **opencode** | JSON | `mcp` (outlier) | `{"type":"local", "command":[BIN,"serve"], "enabled":true, "environment":{}}` | `~/.config/opencode/opencode.json` | `opencode.json[c]` in project root (highest precedence) | `~/.config/opencode/skills/` |
 | **Cursor** | JSON | `mcpServers` | `{"command": BIN, "args": ["serve"], "env": {}}`; optional `envFile` (stdio only) | `~/.cursor/mcp.json` (**create — does not exist yet**) | `.cursor/mcp.json` | `~/.cursor/skills/` |
+| **GitHub Copilot CLI** | JSON | `mcpServers` | `{"type":"local", "command": BIN, "args": ["serve"], "env": {}, "tools": ["*"]}` | `~/.copilot/mcp-config.json` (honors `COPILOT_HOME`) | `.mcp.json` or `.github/mcp.json` | `~/.copilot/skills/` |
+| **Junie CLI** | JSON | `mcpServers` | `{"command": BIN, "args": ["serve"], "env": {}}` | `~/.junie/mcp/mcp.json` | `<project>/.junie/mcp/mcp.json` | `~/.junie/skills/` |
 
 ### Per-agent gotchas (verified)
 
@@ -228,13 +230,20 @@ variant on this machine. Detect which by presence of `~/.grok/config.toml` vs
 - **Cursor:** if the top-level `mcpServers` key is missing/misspelled, Cursor
   silently ignores the file. `~/.cursor/` exists but `~/.cursor/mcp.json` must be
   created.
+- **GitHub Copilot CLI:** user-level MCP config lives at `~/.copilot/mcp-config.json`
+  and user-level skills at `~/.copilot/skills/`; `COPILOT_HOME` replaces the whole
+  `~/.copilot` tree. Local MCP entries include a `tools` allowlist, so onboard writes
+  `tools: ["*"]`.
+- **Junie CLI:** user-level MCP config lives at `~/.junie/mcp/mcp.json`, project config
+  at `<project>/.junie/mcp/mcp.json`, and user-level skills at `~/.junie/skills/`.
 
 ### Installer logic
 
 Serialize **TOML** for Codex + Grok (`[mcp_servers.onboard]`, `command = BIN`,
-`args = ["serve"]`); **JSON** for the other three. opencode merges into one array.
-Claude Code/Cursor use `{"mcpServers":{"onboard":{...}}}`. For Grok, detect TOML vs
-npm-JSON variant by config-file presence.
+`args = ["serve"]`); **JSON** for the other agents. opencode merges into one array.
+Claude Code/Cursor/Junie use `{"mcpServers":{"onboard":{...}}}`. Copilot uses the same
+root with an extra `tools: ["*"]` allowlist. For Grok, detect TOML vs npm-JSON variant by
+config-file presence.
 
 **Confidence:** high (verified against official docs and live local config files).
 
@@ -245,6 +254,10 @@ npm-JSON variant by config-file presence.
 - https://github.com/openai/codex/blob/main/docs/config.md
 - https://opencode.ai/docs/mcp-servers/
 - https://cursor.com/docs/mcp
+- https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
+- https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers
+- https://junie.jetbrains.com/docs/junie-cli-mcp-configuration.html
+- https://junie.jetbrains.com/docs/agent-skills.html
 - https://www.superagent.sh/blog/grok-cli-mcp-support
 - Local: `~/.grok/README.md` (xAI Grok Build CLI v0.2.3, MCP section), `~/.grok/config.toml`,
   `~/.codex/config.toml`, `~/.claude.json`, `~/.claude/mcp.json`,
@@ -427,13 +440,13 @@ The MCP client connects with `&mcp.StreamableClientTransport{Endpoint:
 ### DECISION
 
 Ship **all four** new skills as separate single-capability skills that compose
-with the existing `codebase-walkthrough` skill and reuse the Phase 1–6 engine plus
+with the existing `onboard-codebase-walkthrough` skill and reuse the Phase 1–6 engine plus
 the `recon` / `trace_flow` / `impact` / `render_map` / `guide` tools, partitioned
 so **no two descriptions compete**:
 
-- **`codebase-walkthrough` (existing):** teaches the codebase phase-by-phase;
+- **`onboard-codebase-walkthrough` (existing):** teaches the codebase phase-by-phase;
   retains the interactive clickable-HTML map mode.
-- **`architecture-cartographer` (new):** emits **durable diagrams-as-code**
+- **`onboard-architecture-cartographer` (new):** emits **durable diagrams-as-code**
   (Mermaid C4Context/C4Container/C4Component, erDiagram, classDiagram, flowchart)
   as committable artifacts. Triggers: diagram / map / ERD / dependency-graph
   requests. Runs Phase 1 recon + Phase 3 architecture; picks diagram type by
@@ -441,7 +454,7 @@ so **no two descriptions compete**:
   nodes per diagram; emits diagram-as-code plus a file-path legend. Tools: `recon`,
   `impact`, `render_map` (static output, not interactive HTML). The
   keep-this-diagram sibling of walkthrough's interactive-map mode.
-- **`guide-maintainer` (new):** refreshes a cached codebase guide via **git-SHA
+- **`onboard-guide-maintainer` (new):** refreshes a cached codebase guide via **git-SHA
   delta**, updating only sections touched by changed files. Triggers: update /
   refresh / sync the guide, or cached SHA ≠ HEAD. Steps: read cache header + stored
   SHA → `git rev-parse HEAD` (stop if equal) → `git diff --name-status <sha> HEAD`
@@ -450,7 +463,7 @@ so **no two descriptions compete**:
   optionally sync `CLAUDE.md` preserving existing instructions. Tools: `guide`,
   `recon`, `trace_flow`, `impact`. Owns the maintenance loop that `cached-guide.md`
   (lines 8–24) defines only for first generation.
-- **`test-gap-and-risk-auditor` (new):** standing **whole-codebase** audit of
+- **`onboard-test-gap-and-risk-auditor` (new):** standing **whole-codebase** audit of
   negative space (untested paths, unhandled errors, fragile integration seams,
   silent AI-build assumptions) → ranked risk register. Triggers: what is untested /
   where is the risk / find fragile parts / pre-change coverage audit. Runs Phase 2
@@ -458,7 +471,7 @@ so **no two descriptions compete**:
   call graph for reachable-but-untested paths, enumerate integration seams and flag
   disagreements, list baked-in assumptions, run the defend-the-design pass, emit a
   prioritized register. Tools: `recon`, `guide`, `trace_flow`, `impact`.
-- **`dependency-impact-analyzer` (new):** computes **blast radius of one proposed
+- **`onboard-dependency-impact-analyzer` (new):** computes **blast radius of one proposed
   change** (callers, dependents, at-risk tests downstream of a function / file /
   endpoint / schema). Triggers: what breaks if I change X / what depends on this /
   who calls this / safe to rename/delete Y. Steps: resolve target → reverse-traverse
@@ -471,12 +484,12 @@ so **no two descriptions compete**:
 
 **Partitioning** (so descriptions don't collide): walkthrough **teaches**;
 cartographer **draws** durable diagram-as-code (interactive HTML stays in
-walkthrough); guide-maintainer runs the **delta-update loop**; auditor produces a
+walkthrough); onboard-guide-maintainer runs the **delta-update loop**; auditor produces a
 **standing** risk register; analyzer computes **per-change** blast radius. The
 auditor (whole-codebase, standing) and analyzer (one-target, per-change) are
 deliberately distinct.
 
-**If forced to cut one:** drop `architecture-cartographer` first (most overlap with
+**If forced to cut one:** drop `onboard-architecture-cartographer` first (most overlap with
 interactive-map mode). The analyzer and auditor are the highest-value,
 least-overlapping additions.
 
@@ -507,7 +520,7 @@ least-overlapping additions.
 2. Pick one naming convention for the suite.
 3. Confirm interactive HTML stays in walkthrough while cartographer owns static
    diagram-as-code (recommended).
-4. Should `guide-maintainer` and `dependency-impact-analyzer` **hard-require** the
+4. Should `onboard-guide-maintainer` and `onboard-dependency-impact-analyzer` **hard-require** the
    code-graph MCP or degrade to grep? Blast radius via grep is unreliable on
    AI-built code — recommend hard-require.
 
