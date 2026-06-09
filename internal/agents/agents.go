@@ -90,10 +90,22 @@ func Registry() ([]Agent, error) {
 		grok.Shape = ShapeJSONMcpServers
 	}
 
+	kimiHome := j(".kimi-code")
+	if env := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME")); env != "" {
+		kimiHome = env
+		if !filepath.IsAbs(kimiHome) {
+			kimiHome = filepath.Join(home, kimiHome)
+		}
+		if abs, err := filepath.Abs(kimiHome); err == nil {
+			kimiHome = abs
+		}
+	}
+
 	return []Agent{
 		{Name: "claude", SkillsDir: j(".claude", "skills"), ConfigPath: j(".claude.json"), Shape: ShapeJSONMcpServers},
 		{Name: "codex", SkillsDir: filepath.Join(codexHome, "skills"), ConfigPath: filepath.Join(codexHome, "config.toml"), Shape: ShapeTOMLMcpServers},
 		grok,
+		{Name: "kimi", SkillsDir: filepath.Join(kimiHome, "skills"), ConfigPath: filepath.Join(kimiHome, "mcp.json"), Shape: ShapeJSONMcpServers},
 		{Name: "opencode", SkillsDir: j(".config", "opencode", "skills"), ConfigPath: j(".config", "opencode", "opencode.json"), Shape: ShapeJSONOpencode},
 		{Name: "cursor", SkillsDir: j(".cursor", "skills"), ConfigPath: j(".cursor", "mcp.json"), Shape: ShapeJSONMcpServers},
 		{Name: "copilot", SkillsDir: filepath.Join(copilotHome, "skills"), ConfigPath: filepath.Join(copilotHome, "mcp-config.json"), Shape: ShapeJSONMcpServersWithTools},
@@ -113,7 +125,7 @@ func Find(name string) (Agent, error) {
 			return a, nil
 		}
 	}
-	return Agent{}, fmt.Errorf("unknown agent %q (known: claude, codex, grok, opencode, cursor, copilot, junie)", name)
+	return Agent{}, fmt.Errorf("unknown agent %q (known: claude, codex, grok, kimi, opencode, cursor, copilot, junie)", name)
 }
 
 // Detected reports whether the agent appears installed (its config or skills

@@ -275,8 +275,8 @@ func TestRegistryShapes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) < 7 {
-		t.Errorf("expected >=7 agents, got %d", len(all))
+	if len(all) < 8 {
+		t.Errorf("expected >=8 agents, got %d", len(all))
 	}
 	byName := map[string]Agent{}
 	for _, a := range all {
@@ -287,6 +287,9 @@ func TestRegistryShapes(t *testing.T) {
 	}
 	if byName["codex"].Shape != ShapeTOMLMcpServers {
 		t.Error("codex should be TOML mcp_servers")
+	}
+	if byName["kimi"].Shape != ShapeJSONMcpServers {
+		t.Error("kimi should be JSON mcpServers")
 	}
 	if byName["opencode"].Shape != ShapeJSONOpencode {
 		t.Error("opencode should be the JSON opencode outlier shape")
@@ -311,6 +314,12 @@ func TestRegistryShapes(t *testing.T) {
 	}
 	if !strings.HasSuffix(byName["junie"].SkillsDir, filepath.Join(".junie", "skills")) {
 		t.Errorf("junie skills path = %q", byName["junie"].SkillsDir)
+	}
+	if !strings.HasSuffix(byName["kimi"].ConfigPath, filepath.Join(".kimi-code", "mcp.json")) {
+		t.Errorf("kimi config path = %q", byName["kimi"].ConfigPath)
+	}
+	if !strings.HasSuffix(byName["kimi"].SkillsDir, filepath.Join(".kimi-code", "skills")) {
+		t.Errorf("kimi skills path = %q", byName["kimi"].SkillsDir)
 	}
 }
 
@@ -357,6 +366,29 @@ func TestRegistryHonorsCopilotHome(t *testing.T) {
 	}
 	if copilot.SkillsDir != filepath.Join(dir, "skills") {
 		t.Errorf("copilot skills dir = %q, want COPILOT_HOME skills", copilot.SkillsDir)
+	}
+}
+
+func TestRegistryHonorsKimiCodeHome(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", dir)
+
+	all, err := Registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kimi Agent
+	for _, a := range all {
+		if a.Name == "kimi" {
+			kimi = a
+			break
+		}
+	}
+	if kimi.ConfigPath != filepath.Join(dir, "mcp.json") {
+		t.Errorf("kimi config path = %q, want KIMI_CODE_HOME config", kimi.ConfigPath)
+	}
+	if kimi.SkillsDir != filepath.Join(dir, "skills") {
+		t.Errorf("kimi skills dir = %q, want KIMI_CODE_HOME skills", kimi.SkillsDir)
 	}
 }
 

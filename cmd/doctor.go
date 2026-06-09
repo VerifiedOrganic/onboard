@@ -67,6 +67,6 @@ problem, so it is safe to use as a post-install or CI check.`,
 }
 
 func init() {
-	doctorCmd.Flags().StringVar(&doctorAgent, "agent", "", "check only this agent (claude, codex, grok, opencode, cursor, copilot, junie)")
+	doctorCmd.Flags().StringVar(&doctorAgent, "agent", "", "check only this agent (claude, codex, grok, kimi, opencode, cursor, copilot, junie)")
 	rootCmd.AddCommand(doctorCmd)
 }

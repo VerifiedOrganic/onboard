@@ -12,7 +12,7 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Detect installed agents and wire onboard into each",
-	Long:  "Scans for installed agents (Claude Code, Grok, Codex, opencode, Cursor, Copilot CLI, Junie CLI) and installs onboard into every one it finds. A convenience wrapper over `install --all`.",
+	Long:  "Scans for installed agents (Claude Code, Grok, Codex, Kimi CLI, opencode, Cursor, Copilot CLI, Junie CLI) and installs onboard into every one it finds. A convenience wrapper over `install --all`.",
 	RunE: func(_ *cobra.Command, _ []string) error {
 		bin, err := os.Executable()
 		if err != nil {

@@ -46,7 +46,7 @@ var rootCmd = &cobra.Command{
 architecture, data flow, end-to-end traces, and the risky negative space.
 
 It embeds namespaced onboard-* skills and serves them to any MCP-capable agent
-(Claude Code, Grok, Codex, opencode, Cursor, Copilot CLI, Junie CLI) and to headless/CI use.
+(Claude Code, Grok, Codex, Kimi CLI, opencode, Cursor, Copilot CLI, Junie CLI) and to headless/CI use.
 
   onboard serve              run the MCP server over stdio
   onboard install --all      wire it into every detected agent

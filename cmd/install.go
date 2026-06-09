@@ -96,7 +96,7 @@ func resolveTargets() ([]agents.Agent, error) {
 }
 
 func init() {
-	installCmd.Flags().StringVar(&installAgent, "agent", "", "agent to install into (claude|grok|codex|opencode|cursor|copilot|junie)")
+	installCmd.Flags().StringVar(&installAgent, "agent", "", "agent to install into (claude|grok|codex|kimi|opencode|cursor|copilot|junie)")
 	installCmd.Flags().BoolVar(&installAll, "all", false, "install into all detected agents")
 	rootCmd.AddCommand(installCmd)
 }
