@@ -15,7 +15,7 @@ Scope: one target, one change, before the edit. For a standing, whole-repository
 
 Get two things straight before touching any tool:
 
-1. **The target** — the exact symbol, file, endpoint, or schema field in question. If the user named it loosely ("the auth check"), resolve it to a concrete symbol first. Prefer a qualified form (`file::name`) so you analyze the right thing and not a same-named neighbor.
+1. **The target** — the exact symbol, file, endpoint, or schema field in question. If the user named it loosely ("the auth check"), resolve it to a concrete symbol first. Prefer a qualified form (`file::name`) so you analyze the right thing and not a same-named neighbor. Terraform/Terragrunt targets are first-class: variables, outputs, locals, module calls, and resources index by their address (`var.nodes`, `output.api_endpoint`, `module.inventory`, `redfish_power.on`), so query e.g. `modules/inventory/variables.tf::var.nodes` — the blast radius covers module wiring, Terragrunt inputs/includes, and `.tftest.hcl` tests, with the IaC-specific blind spots listed in `references/hidden-coupling.md` item 10.
 2. **The kind of change** — rename, signature/contract change, deletion, or behavior change. The blast-radius question differs for each: a rename breaks *references*; a signature change breaks *callers' call sites*; a deletion breaks *everyone downstream*; a behavior change breaks *assumptions* and may not surface as a broken call at all.
 
 If you cannot locate the target, run `onboard:recon(root)` to map the codebase and surface candidate symbols. The change kind shapes every later step, so do not skip naming it.

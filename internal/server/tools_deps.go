@@ -137,13 +137,13 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 	}
 
 	if len(out.Manifests) == 0 {
-		out.Note = "No recognized dependency manifests found (go.mod, package.json, requirements.txt, Cargo.toml)."
+		out.Note = "No recognized dependency manifests found (go.mod, package.json, requirements.txt, Cargo.toml, versions.tf, .terraform.lock.hcl)."
 		return out, nil
 	}
 	if in.Format == "mermaid" {
 		out.Mermaid, out.Truncated = renderDepsMermaid(out.Manifests)
 	}
-	out.Note = "Direct dependencies parsed from manifests (facts, not inferred). Rust manifests are upgraded with `cargo metadata --no-deps` when available; versions reflect declared constraints, not resolved lockfile versions."
+	out.Note = "Direct dependencies parsed from manifests (facts, not inferred). Rust manifests are upgraded with `cargo metadata --no-deps` when available; versions reflect declared constraints, not resolved lockfile versions. Terraform/OpenTofu providers appear twice when a lock file is present: the declared constraint (kind: provider) and the pinned version (kind: locked)."
 	return out, nil
 }
 
@@ -182,7 +182,7 @@ func renderDepsMermaid(manifests []manifestDeps) (string, bool) {
 func registerDepsTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "deps",
-		Description: "Extract the external dependency graph from a repo's manifests (go.mod, package.json, requirements.txt, Cargo.toml) — direct dependencies with declared versions per manifest, optionally as a Mermaid flowchart. Facts read from manifests, not inferred. Use to ground a dependency diagram or answer 'what does this project depend on'.",
+		Description: "Extract the external dependency graph from a repo's manifests (go.mod, package.json, requirements.txt, Cargo.toml, Terraform required_providers + lock files, external module sources) — direct dependencies with declared versions per manifest, optionally as a Mermaid flowchart. Facts read from manifests, not inferred. Use to ground a dependency diagram or answer 'what does this project depend on'.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in depsInput) (*mcp.CallToolResult, depsOutput, error) {
 		out, err := depsExtract(ctx, in)
 		return nil, out, err

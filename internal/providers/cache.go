@@ -10,7 +10,7 @@ import (
 
 // cacheVersion is bumped whenever the on-disk format or the tagging/resolution logic
 // changes in a way that would make a stored index stale. A mismatch forces a rebuild.
-const cacheVersion = 5
+const cacheVersion = 6
 
 type resolvedImport struct {
 	targetFile string

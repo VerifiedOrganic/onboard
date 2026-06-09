@@ -226,7 +226,9 @@ func isTestFile(path string) bool {
 		strings.HasSuffix(baseLower, "_test") ||
 		strings.HasSuffix(baseLower, ".test"+ext) ||
 		strings.HasSuffix(baseLower, ".spec"+ext) ||
-		strings.HasSuffix(baseLower, ".cy"+ext) {
+		strings.HasSuffix(baseLower, ".cy"+ext) ||
+		strings.HasSuffix(baseLower, ".tftest.hcl") ||
+		strings.HasSuffix(baseLower, ".tofutest.hcl") {
 		return true
 	}
 	slashed := "/" + filepath.ToSlash(strings.ToLower(path)) + "/"

@@ -30,6 +30,7 @@ Run through these for every blast-radius query. Each is a class of edge the grap
 7. **Temporal / ordering coupling** — code that works only because A runs before B (init order, migrations, cache warming, event sequence). Changing the target may not break a *caller* but may break an *assumption about when it runs*. Invisible to any caller graph.
 8. **Shared mutable state** — globals, singletons, module-level caches, the DB itself. Two functions couple through the state they both touch with no call edge between them.
 9. **Tests that mock the target** — a mock keyed by name or path won't move when you rename, and the test keeps passing while production breaks. At-risk tests that *mock* the target are a false sense of safety, not coverage.
+10. **Terraform/Terragrunt-specific edges** — when the target is a variable, output, module, or resource, the graph covers in-repo wiring (var/local/module/output references, Terragrunt includes, dependency blocks, inputs), but NOT: `TF_VAR_*` environment injection from CI, `-var`/`-var-file` flags in pipeline definitions, `terraform_remote_state` readers in other stacks *or other repos*, outputs consumed by CI scripts or humans, `read_terragrunt_config` indirection, `generate`-block code that exists only at run time, and provider-alias wiring. Renaming an output is a cross-repo data-contract change, exactly like renaming a serialized field. Grep for the bare name, for `TF_VAR_<name>`, and check pipeline files before trusting the number.
 
 ## How to hunt for each
 

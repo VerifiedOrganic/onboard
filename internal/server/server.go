@@ -27,6 +27,7 @@ func New(version string) *mcp.Server {
 	registerDepsTool(s)        // deps — external dependency graph from manifests
 	registerSchemaTool(s)      // schema — SQL DDL → entities + ERD
 	registerRoutesTool(s)      // routes — HTTP API surface from framework patterns
+	registerStacksTool(s)      // stacks — deployable IaC units (Terraform/Terragrunt/OpenTofu)
 	registerMapTool(s)         // render_map — interactive HTML / static Mermaid map
 	registerSkillResources(s)  // onboard://skills/* — for clients that read resources
 	registerPrompt(s)          // /onboard prompts — for clients that surface prompts

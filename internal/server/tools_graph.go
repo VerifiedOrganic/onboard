@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -78,6 +79,7 @@ func traceFlow(ctx context.Context, in traceFlowInput) (traceFlowOutput, error) 
 	default:
 		out.Note = edgeCaveat(g) + goPrecisionHint(g, in.Precise)
 	}
+	out.Note = ambiguityNote(in.Entry, syms) + out.Note
 
 	type item struct {
 		q string
@@ -246,7 +248,19 @@ func impactAnalysis(ctx context.Context, in impactInput) (impactOutput, error) {
 	if in.Precise && !g.Precise {
 		out.Note = semanticPrecisionUnavailableNote() + out.Note
 	}
+	out.Note = ambiguityNote(in.Symbol, syms) + out.Note
 	return out, nil
+}
+
+// ambiguityNote makes a silent pick-first visible: when a query matched more
+// than one definition, the note leads with that fact so a caller that does not
+// inspect the candidates field cannot mistake the result for the only match.
+func ambiguityNote(query string, syms []*providers.Symbol) string {
+	if len(syms) <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("Ambiguous: %q matched %d definitions; results are for %s — pass a fuller qualified name (see candidates) if that is the wrong one. ",
+		query, len(syms), syms[0].QName)
 }
 
 func registerGraphTools(s *mcp.Server) {

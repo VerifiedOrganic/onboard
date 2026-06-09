@@ -67,6 +67,8 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*Graph, error) {
 	// One tagger per language (decompressing a grammar + compiling its tags query is
 	// expensive; reuse across files). A nil entry means "unsupported, skip".
 	taggers := map[string]*ts.Tagger{}
+	var hclEng *hclEngine
+	hclEngKnown := false
 	var reused, retagged int
 
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -84,6 +86,13 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*Graph, error) {
 		}
 
 		entry := grammars.DetectLanguage(p)
+		if entry == nil {
+			// OpenTofu renamed Terraform's extensions; gotreesitter does not
+			// register them, so alias them to the HCL grammar here.
+			if ext := strings.ToLower(filepath.Ext(p)); ext == ".tofu" || ext == ".tofuvars" {
+				entry = grammars.DetectLanguageByName("hcl")
+			}
+		}
 		if entry == nil {
 			return nil
 		}
@@ -117,6 +126,36 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*Graph, error) {
 			fresh.Files[rel] = diskFile{
 				Hash:    h,
 				Lang:    entry.Name,
+				Defs:    defs,
+				Refs:    toDiskRefs(refs),
+				Imports: toDiskImports(imports),
+			}
+			retagged++
+			return nil
+		}
+
+		if entry.Name == "hcl" {
+			// Lock files are provider metadata, not architecture; the deps tool
+			// reads them. Indexing them would pollute the graph with one
+			// "provider" def per registry mirror entry.
+			if base := filepath.Base(p); base == ".terraform.lock.hcl" || base == ".opentofu.lock.hcl" {
+				return nil
+			}
+			if !hclEngKnown {
+				hclEng = newHCLEngine()
+				hclEngKnown = true
+			}
+			if hclEng == nil {
+				return nil
+			}
+			defs, refs, imports := tagHCLFile(root, rel, src, hclEng)
+			if len(defs) == 0 && len(refs) == 0 {
+				return nil
+			}
+			perFile[rel] = fileData{lang: "hcl", defs: defs, refs: refs, imports: imports}
+			fresh.Files[rel] = diskFile{
+				Hash:    h,
+				Lang:    "hcl",
 				Defs:    defs,
 				Refs:    toDiskRefs(refs),
 				Imports: toDiskImports(imports),
@@ -317,6 +356,13 @@ func assembleGraph(perFile map[string]fileData, _ string) *Graph {
 }
 
 func (r rawRef) lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvName, byRecvName map[string][]string, fileImports map[string]map[string]resolvedImport) string {
+	// 0. HCL (Terraform/Terragrunt) uses its own scoping: same file, then same
+	// directory (module), plus explicit cross-module targets — never global
+	// by-name (which would link same-named variables across modules).
+	if isHCLFile(r.callerFile) {
+		return r.lookupHCL(byFileName, byDirName, fileImports)
+	}
+
 	// 1. Check template associated file resolution (Angular component template matching)
 	if strings.HasSuffix(r.callerFile, ".html") {
 		assoc := strings.TrimSuffix(r.callerFile, ".html") + ".ts"

@@ -71,6 +71,8 @@ The `<!-- walkthrough-cache ... -->` header at the very top is owned by `guide_w
 | New/changed dev/build/test/lint/migrate command | Common Tasks |
 | File renamed or moved | Directory Map, Key Entry Points, Where to Look, plus any inline path references |
 | File deleted | Every section that referenced it (prune — see below) |
+| Terraform/Terragrunt: new/removed `terragrunt.hcl`, or `environments/**` tree change | Key Entry Points (stacks ARE the entry points), Architecture, Directory Map |
+| Terraform/Terragrunt: module `variables.tf`/`outputs.tf` contract change, or `versions.tf`/lock-file change | Architecture, Request Lifecycle (the apply/value traces), Tech Stack |
 
 If you cannot map a change to any section, that change does not move the guide. Say so rather than inventing an edit.
 

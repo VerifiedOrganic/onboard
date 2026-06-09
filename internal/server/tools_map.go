@@ -37,6 +37,7 @@ type renderMapInput struct {
 	Format     string    `json:"format,omitempty" jsonschema:"html (self-contained interactive map) or mermaid (diagram-as-code); default html"`
 	Nodes      []mapNode `json:"nodes,omitempty" jsonschema:"explicit nodes; if omitted, a package-level map is derived from the code graph"`
 	Edges      []mapEdge `json:"edges,omitempty" jsonschema:"explicit edges between node ids; ignored unless nodes are given"`
+	MaxNodes   int       `json:"max_nodes,omitempty" jsonschema:"cap on derived nodes (default 12, max 40); larger architectures are truncated to the most-connected directories and the note says how many were dropped"`
 	OutputPath string    `json:"output_path,omitempty" jsonschema:"absolute path to write the file; if empty the content is only returned"`
 	Refresh    bool      `json:"refresh,omitempty" jsonschema:"re-index the repo instead of using the cached graph (only when deriving)"`
 }
@@ -71,15 +72,28 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 		if err != nil {
 			return out, err
 		}
+		maxNodes := in.MaxNodes
+		switch {
+		case maxNodes <= 0:
+			maxNodes = maxMapNodes
+		case maxNodes > 40:
+			maxNodes = 40
+		}
 		var truncated bool
-		nodes, edges, truncated = deriveMap(g)
+		var totalDirs int
+		nodes, edges, totalDirs, truncated = deriveMap(g, maxNodes)
 		out.Derived = true
 		out.Truncated = truncated
 		if len(nodes) == 0 {
 			out.Note = "No structural nodes could be derived (no cross-package call edges found). Provide explicit nodes/edges to render a map."
 			return out, nil
 		}
-		if len(nodes) < minMapNodes {
+		switch {
+		case truncated:
+			// Clipping used to be silent, which read as "this is the whole
+			// architecture" — name what was dropped and how to widen.
+			out.Note = fmt.Sprintf("Showing the %d most-connected directories of %d total; pass max_nodes (up to 40) to widen, or provide explicit nodes/edges.", len(nodes), totalDirs)
+		case len(nodes) < minMapNodes:
 			out.Note = fmt.Sprintf("Only %d nodes derived; a map is usually most legible with %d–%d.", len(nodes), minMapNodes, maxMapNodes)
 		}
 	}
@@ -136,8 +150,9 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 }
 
 // deriveMap aggregates the file-level call graph to a directory-level dependency
-// map, keeping the most-connected directories (5–12 nodes).
-func deriveMap(g *providers.Graph) (nodes []mapNode, edges []mapEdge, truncated bool) {
+// map, keeping the maxNodes most-connected directories. total is the directory
+// count before clipping so callers can report what was dropped.
+func deriveMap(g *providers.Graph, maxNodes int) (nodes []mapNode, edges []mapEdge, total int, truncated bool) {
 	dirOf := func(qname string) string {
 		file := qname
 		if s := g.Defs[qname]; s != nil {
@@ -196,8 +211,9 @@ func deriveMap(g *providers.Graph) (nodes []mapNode, edges []mapEdge, truncated 
 		}
 		return all[i].dir < all[j].dir
 	})
-	if len(all) > maxMapNodes {
-		all = all[:maxMapNodes]
+	total = len(all)
+	if len(all) > maxNodes {
+		all = all[:maxNodes]
 		truncated = true
 	}
 
@@ -231,7 +247,7 @@ func deriveMap(g *providers.Graph) (nodes []mapNode, edges []mapEdge, truncated 
 			edges = append(edges, mapEdge{From: fd, To: td, Label: label})
 		}
 	}
-	return nodes, edges, truncated
+	return nodes, edges, total, truncated
 }
 
 // Mermaid/HTML rendering (renderMermaid, renderMapHTML, the sanitizers, and the HTML

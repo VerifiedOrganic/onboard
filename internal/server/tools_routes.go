@@ -68,6 +68,7 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 
 	seen := map[string]bool{}
 	files := 0
+	sawIaC := false
 	add := func(method, path, file string, line int, source, pattern, confidence string) {
 		method = strings.ToUpper(method)
 		key := method + " " + path + " " + file
@@ -99,6 +100,15 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 		rel, _ := filepath.Rel(root, p)
 		relSlash := filepath.ToSlash(rel)
 		lowerRel := strings.ToLower(relSlash)
+
+		switch strings.ToLower(filepath.Ext(p)) {
+		case ".tf", ".tofu":
+			sawIaC = true
+		case ".hcl":
+			if d.Name() == "terragrunt.hcl" {
+				sawIaC = true
+			}
+		}
 
 		// 1. SvelteKit file-convention
 		if isRouteDirPath(lowerRel) && (strings.HasSuffix(lowerRel, "+page.svelte") || strings.HasSuffix(lowerRel, "+server.ts") || strings.HasSuffix(lowerRel, "+server.js")) {
@@ -201,6 +211,9 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 
 	if out.Total == 0 {
 		out.Note = "No HTTP routes matched the known framework patterns (Go chi/gin/echo/gorilla/net-http, SvelteKit, Next.js, Remix, Angular, Express, Flask, FastAPI)."
+		if sawIaC {
+			out.Note += " This looks like an infrastructure (Terraform/Terragrunt/OpenTofu) repo — its deploy surface is stacks, not routes; use the stacks tool."
+		}
 		return out, nil
 	}
 	out.Note = "Routes matched from file-conventions and registration patterns — a recall-oriented heuristic, not a parser: bespoke routing may be missed and dynamic paths may be approximate."

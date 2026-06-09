@@ -55,6 +55,16 @@ var manifests = map[string]string{
 	"mix.exs":          "Elixir",
 	"pubspec.yaml":     "Dart/Flutter",
 	"Package.swift":    "Swift",
+	"versions.tf":      "Terraform (HCL)",
+	"terragrunt.hcl":   "Terragrunt",
+	"root.hcl":         "Terragrunt",
+}
+
+// iacManifests are recorded in the manifests list but contribute a cleaner
+// stack label than their filename would suggest.
+var iacManifests = map[string]string{
+	".terraform.lock.hcl": "Terraform (HCL)",
+	".opentofu.lock.hcl":  "OpenTofu (HCL)",
 }
 
 func registerReconTool(s *mcp.Server) {
@@ -73,6 +83,7 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 
 	stackSet := map[string]bool{}
 	fwSet := map[string]bool{}
+	extCount := map[string]int{}
 
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -87,10 +98,24 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 		}
 		out.FileCount++
 		rel, _ := filepath.Rel(root, p)
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != "" {
+			extCount[ext]++
+		}
 
 		if eco, ok := manifests[name]; ok {
 			stackSet[eco] = true
 			out.Manifests = append(out.Manifests, rel)
+		}
+		if eco, ok := iacManifests[name]; ok {
+			stackSet[eco] = true
+			out.Manifests = append(out.Manifests, rel)
+		}
+		switch ext {
+		case ".tf", ".tfvars":
+			stackSet["Terraform (HCL)"] = true
+		case ".tofu", ".tofuvars":
+			stackSet["OpenTofu (HCL)"] = true
 		}
 
 		switch {
@@ -108,15 +133,30 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 			fwSet["Django"] = true
 		case strings.HasPrefix(name, "tailwind.config."):
 			fwSet["Tailwind"] = true
+		case name == "terragrunt.hcl" || name == "root.hcl":
+			fwSet["Terragrunt"] = true
 		}
 
 		switch strings.TrimSuffix(name, filepath.Ext(name)) {
 		case "main", "index", "app", "server":
-			if !strings.Contains(rel, "test") {
-				out.EntryPoints = append(out.EntryPoints, rel)
+			if strings.Contains(rel, "test") {
+				break
 			}
+			// A Terraform module's main.tf is internal plumbing, not an entry
+			// point; only root modules (outside modules/) are deployable.
+			if ext == ".tf" || ext == ".tofu" {
+				if !strings.Contains(filepath.ToSlash(rel), "modules/") {
+					out.EntryPoints = append(out.EntryPoints, rel)
+				}
+				break
+			}
+			out.EntryPoints = append(out.EntryPoints, rel)
 		}
 		if filepath.ToSlash(rel) == "src/lib.rs" {
+			out.EntryPoints = append(out.EntryPoints, rel)
+		}
+		// Each terragrunt.hcl is a deployable unit — the IaC analogue of a main().
+		if name == "terragrunt.hcl" {
 			out.EntryPoints = append(out.EntryPoints, rel)
 		}
 
@@ -124,6 +164,8 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 			strings.Contains(name, ".spec.") ||
 			strings.Contains(name, ".test.") ||
 			strings.HasPrefix(name, "test_") ||
+			strings.HasSuffix(name, ".tftest.hcl") ||
+			strings.HasSuffix(name, ".tofutest.hcl") ||
 			isRustTestPath(rel) {
 			out.TestLayout = addUnique(out.TestLayout, filepath.Dir(rel))
 		}
@@ -146,6 +188,14 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 			out.Tooling = addUnique(out.Tooling, "golangci-lint")
 		case name == "Makefile":
 			out.Tooling = addUnique(out.Tooling, "Make")
+		case ext == ".rego":
+			out.Tooling = addUnique(out.Tooling, "OPA/Conftest policies (Rego)")
+		case name == ".tflint.hcl":
+			out.Tooling = addUnique(out.Tooling, "TFLint")
+		case name == "atlantis.yaml":
+			out.Tooling = addUnique(out.Tooling, "Atlantis")
+		case name == ".gitlab-ci.yml":
+			out.Tooling = addUnique(out.Tooling, "GitLab CI")
 		}
 		return nil
 	})
@@ -192,10 +242,49 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 		}
 	}
 
-	if len(out.TestLayout) == 0 {
-		out.Note = "No test files detected — the Phase-2 behavioral map will be thin; lean harder on Phase-4 end-to-end traces."
+	var notes []string
+	// An empty stack on a non-empty repo used to return silently, which read as
+	// "nothing here" instead of "I don't speak this language". Name what was
+	// actually seen so the gap is visible and actionable.
+	if len(out.Stack) == 0 && out.FileCount > 0 {
+		notes = append(notes, "No recognized manifests. Most common file extensions: "+
+			topExtensions(extCount, 3)+
+			" — if the repo's primary language is among these, stack and entry-point detection is degraded.")
 	}
+	if len(out.TestLayout) == 0 {
+		notes = append(notes, "No test files detected — the Phase-2 behavioral map will be thin; lean harder on Phase-4 end-to-end traces.")
+	}
+	out.Note = strings.Join(notes, " ")
 	return nil, out, nil
+}
+
+// topExtensions renders the n most common file extensions as ".tf (61), .hcl (12)".
+func topExtensions(extCount map[string]int, n int) string {
+	type ec struct {
+		ext   string
+		count int
+	}
+	ranked := make([]ec, 0, len(extCount))
+	for e, c := range extCount {
+		ranked = append(ranked, ec{e, c})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].count != ranked[j].count {
+			return ranked[i].count > ranked[j].count
+		}
+		return ranked[i].ext < ranked[j].ext
+	})
+	if len(ranked) > n {
+		ranked = ranked[:n]
+	}
+	parts := make([]string, 0, len(ranked))
+	for _, r := range ranked {
+		parts = append(parts, fmt.Sprintf("%s (%d)", r.ext, r.count))
+	}
+	if len(parts) == 0 {
+		return "(none)"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func dedupeStrings(in []string) []string {

@@ -69,6 +69,8 @@ Edges are the part people get wrong, so source them, do not guess. For several d
 - The auto-derived dependency map is import-based, which is steadier than call resolution, but it is still syntactic — conditional, generated, or reflectively-loaded imports can be missed or spurious.
 - If you draw an edge you could not confirm in the graph (e.g. "the queue worker eventually writes the DB," inferred from naming), **mark it inferred** — see Step 4.
 
+**Infrastructure repos (Terraform/Terragrunt/OpenTofu).** Call **onboard:stacks(root=...)** for the deploy surface — every Terragrunt unit and Terraform root module with its module source, include chain, inter-stack dependencies, and state backend; these are facts, the IaC equivalent of `routes`. The auto-derived **onboard:render_map** is a *module graph* here (nodes are module/stack directories, edges are variable/output wiring), and **onboard:deps** returns providers (declared constraint and lock-file pin) plus external module sources. The natural IaC altitudes: environment tree (stacks + include layers), module composition graph (composition root → primitives), and a state map (stack → backend/key pattern).
+
 Do not reach for `onboard:impact` here — per-change blast radius is **onboard-dependency-impact-analyzer**'s job, not cartography.
 
 ## Step 3 — Reduce to a legible diagram (5–12 nodes)

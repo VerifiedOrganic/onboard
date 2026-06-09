@@ -16,16 +16,17 @@ mental model, [concepts.md](concepts.md) is the gentler door.
 | "What did the build write but never wire in?" | `dead_code` |
 | "Draw me the shape of it" | `render_map` |
 | "What's the external/data/HTTP surface?" | `deps`, `schema`, `routes` |
+| "What does this infrastructure repo deploy?" | `stacks` |
 | "Where do bugs and effort cluster?" | `history` |
 | "Write the understanding down and keep it fresh" | `guide_read` / `guide_write` / `guide_delta` |
 
-The `onboard` MCP server exposes **17 tools**, **1 resource family**, and **1 prompt**,
+The `onboard` MCP server exposes **18 tools**, **1 resource family**, and **1 prompt**,
 all registered in `server.New(version)` (`internal/server/server.go`). The server
 identifies itself to clients as `onboard` with the stamped build `version`.
 
-The 17 tools: `list_skills`, `get_skill` (skills); `recon` (structural scan); `repo_map`,
+The 18 tools: `list_skills`, `get_skill` (skills); `recon` (structural scan); `repo_map`,
 `trace_flow`, `impact`, `context_pack`, `history`, `dead_code` (code graph); `explain_diff`
-(change-set review); `deps`, `schema`, `routes` (structured extractors); `render_map`
+(change-set review); `deps`, `schema`, `routes`, `stacks` (structured extractors); `render_map`
 (diagrams); `guide_read`, `guide_write`, `guide_delta` (the cached guide).
 
 Every tool handler uses the Go MCP SDK three-return pattern `(*mcp.CallToolResult, Out,
@@ -368,7 +369,7 @@ onboard-architecture-cartographer, which otherwise asks the model to guess these
 
 **Input:** `root` (opt); `format` (opt) — `mermaid` to also return a dependency flowchart.
 
-**Output:** `manifests` (`[]{manifest, ecosystem, module, direct: [{name, version, kind, target, optional, dev}], indirect, targets}`), `total_direct`, `mermaid` (opt), `truncated`, `note`. Parses `go.mod` (via `x/mod/modfile`), `package.json`, `requirements.txt`, and `Cargo.toml`; Rust manifests are upgraded with `cargo metadata --no-deps` when Cargo is available. Versions are declared constraints, not resolved lockfile versions.
+**Output:** `manifests` (`[]{manifest, ecosystem, module, direct: [{name, version, kind, target, optional, dev}], indirect, targets}`), `total_direct`, `mermaid` (opt), `truncated`, `note`. Parses `go.mod` (via `x/mod/modfile`), `package.json`, `requirements.txt`, `Cargo.toml`, Terraform/OpenTofu `required_providers` blocks in any `.tf`/`.tofu` file, `.terraform.lock.hcl`/`.opentofu.lock.hcl`, and external (registry/git) module sources; Rust manifests are upgraded with `cargo metadata --no-deps` when Cargo is available. Versions are declared constraints, not resolved lockfile versions — except Terraform lock entries, which are the pinned versions (kind `locked`), so declared-vs-pinned is visible side by side.
 
 ### `schema`
 *`internal/server/tools_schema.go`* — Database schema from SQL DDL.
@@ -382,7 +383,14 @@ onboard-architecture-cartographer, which otherwise asks the model to guess these
 
 **Input:** `root` (opt).
 
-**Output:** `routes` (`[]{method, path, file, line}`), `total`, `truncated`, `note`. Matches registration patterns across Go (chi/gin/echo/gorilla/net-http), Express, Flask, and FastAPI. A **recall-oriented heuristic**, not a parser: it can miss bespoke routing and occasionally over-match (it scans source text, including comments). `ANY` = the pattern (e.g. `net/http` `HandleFunc`) does not pin a method.
+**Output:** `routes` (`[]{method, path, file, line}`), `total`, `truncated`, `note`. Matches registration patterns across Go (chi/gin/echo/gorilla/net-http), Express, Flask, and FastAPI. A **recall-oriented heuristic**, not a parser: it can miss bespoke routing and occasionally over-match (it scans source text, including comments). `ANY` = the pattern (e.g. `net/http` `HandleFunc`) does not pin a method. On an infrastructure repo the empty result points at `stacks` instead.
+
+### `stacks`
+*`internal/server/tools_stacks.go`* — Deployable infrastructure units (Terraform/Terragrunt/OpenTofu): the IaC analogue of `routes`.
+
+**Input:** `root` (opt).
+
+**Output:** `stacks` (`[]{path, file, kind, source, source_local, includes, dependencies, backend, state_key, inputs}`), `total`, `truncated`, `note`. One entry per Terragrunt unit (`terragrunt.hcl`) and per Terraform root module (a directory whose `.tf` declares a `backend`/`cloud` block): module source (repo-relative when local, raw when git/registry), the resolved include chain (root.hcl → env → region → ...), `dependency` links between units, the state backend and key pattern (`${...}` left symbolic), and the merged **input names**. Input *values* are never returned — Terragrunt inputs routinely carry secret material. A pattern reader, not an HCL evaluator: literal paths, `${get_repo_root()}`, and `find_in_parent_folders()` are resolved; other interpolations stay symbolic.
 
 ---
 

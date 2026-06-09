@@ -64,6 +64,18 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 
 	var orphans []orphan
 	for q, sym := range g.Defs {
+		if sym.Lang == "hcl" {
+			// Terraform has its own deadness rules: resources and module calls
+			// exist for their side effects and are never "dead"; variables,
+			// locals, and outputs are declarations that can go unreferenced.
+			if o, scanned := hclOrphan(g, q, sym); scanned {
+				out.Scanned++
+				if o != nil {
+					orphans = append(orphans, *o)
+				}
+			}
+			continue
+		}
 		if sym.Kind != "function" && sym.Kind != "method" {
 			continue // only callables can be "uncalled"
 		}
@@ -116,6 +128,59 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 	out.Orphans = orphans
 	out.Note = deadCodeNote(g, in.Precise)
 	return out, nil
+}
+
+// hclOrphan applies Terraform deadness rules to one HCL symbol. scanned
+// reports whether the kind participates in dead-code analysis at all; the
+// orphan is nil when the symbol is alive.
+//
+//   - variable: dead when nothing in its OWN module (directory) reads it.
+//     Callers from outside the directory are writers (module-call arguments,
+//     terragrunt inputs, tfvars) — setting a variable nothing reads has no
+//     effect, so writers do not make it alive.
+//   - local: dead with zero callers; locals are module-scoped, nothing
+//     external can reach them, so confidence is high.
+//   - output: dead with zero in-repo callers, but only medium confidence —
+//     remote state, CI pipelines, and humans read outputs invisibly.
+//   - resource / data / module_call / provider / stack / config / dependency:
+//     never reported; they exist for their side effects.
+func hclOrphan(g *providers.Graph, q string, sym *providers.Symbol) (*orphan, bool) {
+	if isTestSymbol(sym) {
+		return nil, false
+	}
+	switch sym.Kind {
+	case "variable":
+		dir := filepath.ToSlash(filepath.Dir(sym.File))
+		for _, caller := range g.Callers(q) {
+			if filepath.ToSlash(filepath.Dir(qnameFile(caller))) == dir {
+				return nil, true // read within its own module: alive
+			}
+		}
+		return &orphan{
+			QName: q, Symbol: sym.Name, File: sym.File, Line: sym.Line,
+			Kind: sym.Kind, Exported: sym.Public, Confidence: "high",
+			Reason: "variable never referenced inside its own module — setting it (from callers, tfvars, or TF_VAR_*) has no effect",
+		}, true
+	case "local":
+		if len(g.Callers(q)) > 0 {
+			return nil, true
+		}
+		return &orphan{
+			QName: q, Symbol: sym.Name, File: sym.File, Line: sym.Line,
+			Kind: sym.Kind, Exported: false, Confidence: "high",
+			Reason: "local value with no reference — locals are module-scoped, nothing external can read it",
+		}, true
+	case "output":
+		if len(g.Callers(q)) > 0 {
+			return nil, true
+		}
+		return &orphan{
+			QName: q, Symbol: sym.Name, File: sym.File, Line: sym.Line,
+			Kind: sym.Kind, Exported: sym.Public, Confidence: "medium",
+			Reason: "output with no in-repo consumer — remote state readers, CI, and humans are invisible to the graph",
+		}, true
+	}
+	return nil, false
 }
 
 func isSvelteKitEntry(sym *providers.Symbol) bool {
@@ -337,7 +402,9 @@ func deadCodeNote(g *providers.Graph, requestedPrecise bool) string {
 	base := "Leads, not verdicts: the syntactic graph cannot see calls via reflection, code generation, " +
 		"framework/DI registration, build-tagged files, or external importers — verify before deleting. " +
 		"Entry points, framework-managed lifecycles (React, SvelteKit, Next.js, Angular, Storybook), " +
-		"generated files, and test functions are already excluded or marked low-confidence."
+		"generated files, and test functions are already excluded or marked low-confidence. " +
+		"For Terraform/HCL, resources and module calls are never reported (they exist for their side effects); " +
+		"unused variables, locals, and outputs are."
 	if requestedPrecise && !g.Precise {
 		return base + " " + semanticPrecisionUnavailableNote() + edgeCaveat(g)
 	}

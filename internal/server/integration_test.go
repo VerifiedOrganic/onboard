@@ -46,7 +46,7 @@ func TestIntegrationToolsAdvertised(t *testing.T) {
 	want := []string{
 		"list_skills", "get_skill", "recon",
 		"guide_read", "guide_write", "guide_delta",
-		"trace_flow", "impact", "repo_map", "history", "context_pack", "deps", "schema", "routes", "render_map",
+		"trace_flow", "impact", "repo_map", "history", "context_pack", "deps", "schema", "routes", "stacks", "render_map",
 		"dead_code", "explain_diff",
 	}
 	for _, w := range want {

@@ -61,14 +61,16 @@ Two halves of one idea — *how* to teach a codebase, and *the facts* to teach f
 
 - **Skills** — the teaching playbooks, embedded in the binary and namespaced as
   `onboard-*` so they group together in agent skill lists. `onboard-codebase-walkthrough`
-  runs the top-down tour; four siblings cover diagrams, the per-change blast radius, a
-  standing risk register, and keeping a cached guide fresh.
-- **Tools** — 17 MCP tools that turn "where do I even start" into ranked, cited answers:
+  runs the top-down tour; `onboard-infra-walkthrough` does the same for
+  Terraform/Terragrunt/OpenTofu repos; four siblings cover diagrams, the per-change blast
+  radius, a standing risk register, and keeping a cached guide fresh.
+- **Tools** — 18 MCP tools that turn "where do I even start" into ranked, cited answers:
   `recon` (structural scan), `repo_map` (the load-bearing core, ranked), `trace_flow`
   (follow a flow end to end), `impact` (what breaks if I change this), `context_pack`
   (everything relevant to X in one shot), `dead_code` (written-but-never-wired-in),
   `explain_diff` (what this PR touched and its blast radius), plus `deps`, `schema`,
-  `routes`, `history`, `render_map`, and a durable `guide` cache.
+  `routes`, `stacks` (the deployable-IaC-unit surface), `history`, `render_map`, and a
+  durable `guide` cache.
 
 The tools are backed by a **pure-Go tree-sitter code graph** covering ~200 languages with
 no CGo. Its call edges are *syntactic* — resolved by name and lexical scope, not
@@ -76,6 +78,13 @@ type-checked. Translation: treat an edge as a very strong rumour, not a sworn af
 For Go, `precise: true` promotes the rumour to a type-checked fact. For Rust Cargo
 projects, `precise: true` can enrich the graph through `rust-analyzer` call hierarchy when
 that binary is installed; otherwise Rust stays on the zero-setup syntactic fallback.
+
+Infrastructure repos are first-class, not a degraded mode: the graph indexes HCL
+(variables, outputs, module wiring, Terragrunt include/dependency chains), `stacks`
+lists every deployable unit with its state backend and input names, `deps` shows
+declared provider constraints next to lock-file pins, and `dead_code` applies
+Terraform's own deadness rules (a variable nothing reads is dead even if every caller
+sets it; resources never are).
 
 ## The one rule that explains everything
 

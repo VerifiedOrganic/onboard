@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,6 +36,15 @@ func parseManifest(root, path, name string) (manifestDeps, bool) {
 		return parseRequirements(rel, data)
 	case "Cargo.toml":
 		return parseCargoToml(rel, data)
+	case ".terraform.lock.hcl":
+		return parseTFLock(rel, data, "Terraform (lock)")
+	case ".opentofu.lock.hcl":
+		return parseTFLock(rel, data, "OpenTofu (lock)")
+	case "terragrunt.hcl":
+		return parseTerragruntManifest(rel, data)
+	}
+	if strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tofu") {
+		return parseTerraformFile(rel, data)
 	}
 	return manifestDeps{}, false
 }
@@ -394,4 +404,124 @@ func sortDeps(d []dependency) {
 		}
 		return !d[i].Dev && d[j].Dev
 	})
+}
+
+// --- Terraform / Terragrunt / OpenTofu ---------------------------------------
+//
+// Same philosophy as parseCargoToml: a deliberately small reader, not a full HCL
+// parser. required_providers declares the constraint, the lock file pins the
+// resolved version — both are surfaced so declared-vs-locked is visible, the
+// same split the other ecosystems get. Registry/git module sources are external
+// dependencies; local (relative / repo-rooted) sources are workspace wiring and
+// belong to the code graph, not the dependency list.
+
+var (
+	tfRequiredVersionRe   = regexp.MustCompile(`required_version\s*=\s*"([^"]+)"`)
+	tfRequiredProvidersRe = regexp.MustCompile(`required_providers\s*\{`)
+	tfProviderEntryRe     = regexp.MustCompile(`(?s)([A-Za-z_][\w-]*)\s*=\s*\{([^{}]*)\}`)
+	tfSourceAttrRe        = regexp.MustCompile(`source\s*=\s*"([^"]+)"`)
+	tfVersionAttrRe       = regexp.MustCompile(`version\s*=\s*"([^"]+)"`)
+	tfModuleBlockRe       = regexp.MustCompile(`(?m)^\s*module\s+"[^"]+"\s*\{`)
+	tfLockProviderRe      = regexp.MustCompile(`(?s)provider\s+"([^"]+)"\s*\{([^{}]*)\}`)
+)
+
+// hclBlockBody returns the content between the brace at openIdx and its
+// matching close brace (naive — braces inside strings are not special-cased;
+// good enough for manifest-shaped HCL).
+func hclBlockBody(s string, openIdx int) string {
+	depth := 0
+	for i := openIdx; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[openIdx+1 : i]
+			}
+		}
+	}
+	return s[openIdx+1:]
+}
+
+// tfSourceIsLocal reports whether a module source stays inside the repo.
+func tfSourceIsLocal(src string) bool {
+	return strings.HasPrefix(src, "./") || strings.HasPrefix(src, "../") ||
+		src == "." || src == ".." || strings.Contains(src, "${get_repo_root()}")
+}
+
+// parseTerraformFile reads provider requirements and external module sources
+// from one .tf/.tofu file. ok=false when the file declares neither, so plain
+// resource files do not bloat the manifest list.
+func parseTerraformFile(rel string, data []byte) (manifestDeps, bool) {
+	s := string(data)
+	md := manifestDeps{Manifest: rel, Ecosystem: "Terraform/OpenTofu (HCL)"}
+
+	if m := tfRequiredVersionRe.FindStringSubmatch(s); m != nil {
+		md.Engines = map[string]string{"terraform": m[1]}
+	}
+	if loc := tfRequiredProvidersRe.FindStringIndex(s); loc != nil {
+		body := hclBlockBody(s, loc[1]-1)
+		for _, entry := range tfProviderEntryRe.FindAllStringSubmatch(body, -1) {
+			dep := dependency{Name: entry[1], Kind: "provider"}
+			if src := tfSourceAttrRe.FindStringSubmatch(entry[2]); src != nil {
+				dep.Name = src[1] // registry address, e.g. siderolabs/talos
+			}
+			if v := tfVersionAttrRe.FindStringSubmatch(entry[2]); v != nil {
+				dep.Version = v[1]
+			}
+			md.Direct = append(md.Direct, dep)
+		}
+	}
+	for _, loc := range tfModuleBlockRe.FindAllStringIndex(s, -1) {
+		body := hclBlockBody(s, strings.Index(s[loc[0]:], "{")+loc[0])
+		src := tfSourceAttrRe.FindStringSubmatch(body)
+		if src == nil || tfSourceIsLocal(src[1]) {
+			continue
+		}
+		dep := dependency{Name: src[1], Kind: "module"}
+		if v := tfVersionAttrRe.FindStringSubmatch(body); v != nil {
+			dep.Version = v[1]
+		}
+		md.Direct = append(md.Direct, dep)
+	}
+
+	if len(md.Direct) == 0 && md.Engines == nil {
+		return manifestDeps{}, false
+	}
+	sortDeps(md.Direct)
+	return md, true
+}
+
+// parseTFLock reads pinned provider versions from .terraform.lock.hcl /
+// .opentofu.lock.hcl. These are resolved versions, not constraints.
+func parseTFLock(rel string, data []byte, ecosystem string) (manifestDeps, bool) {
+	md := manifestDeps{Manifest: rel, Ecosystem: ecosystem}
+	for _, m := range tfLockProviderRe.FindAllStringSubmatch(string(data), -1) {
+		dep := dependency{Name: m[1], Kind: "locked"}
+		if v := tfVersionAttrRe.FindStringSubmatch(m[2]); v != nil {
+			dep.Version = v[1]
+		}
+		md.Direct = append(md.Direct, dep)
+	}
+	if len(md.Direct) == 0 {
+		return manifestDeps{}, false
+	}
+	sortDeps(md.Direct)
+	return md, true
+}
+
+// parseTerragruntManifest surfaces a Terragrunt unit's module source when it is
+// external (git/registry). Local sources are graph edges, not dependencies.
+func parseTerragruntManifest(rel string, data []byte) (manifestDeps, bool) {
+	src := tfSourceAttrRe.FindStringSubmatch(string(data))
+	if src == nil || tfSourceIsLocal(src[1]) {
+		return manifestDeps{}, false
+	}
+	md := manifestDeps{
+		Manifest:  rel,
+		Ecosystem: "Terragrunt",
+		Direct:    []dependency{{Name: src[1], Kind: "module"}},
+	}
+	return md, true
 }

@@ -34,6 +34,7 @@ func LegacyAliases() map[string]string {
 
 var catalogOrder = []string{
 	"onboard-codebase-walkthrough",
+	"onboard-infra-walkthrough",
 	"onboard-dependency-impact-analyzer",
 	"onboard-test-gap-and-risk-auditor",
 	"onboard-architecture-cartographer",
@@ -47,6 +48,10 @@ var catalogMetadata = map[string]struct {
 	"onboard-codebase-walkthrough": {
 		Summary: "Guided repo tour, first-time cached guide, or interactive map.",
 		Try:     `/onboard` + ` or "walk me through this repo"`,
+	},
+	"onboard-infra-walkthrough": {
+		Summary: "Guided tour of a Terraform/Terragrunt/OpenTofu repo — stacks, module graph, state layout, IaC risk.",
+		Try:     `"walk me through this Terraform repo"`,
 	},
 	"onboard-dependency-impact-analyzer": {
 		Summary: "Blast radius for one proposed function, file, endpoint, schema, or field change.",
