@@ -19,3 +19,6 @@ var (
 	// ErrRootNotDirectory indicates the resolved path exists but is not a directory.
 	ErrRootNotDirectory = errors.New("root is not a directory")
 )
+
+// Is reports whether err matches target.
+func Is(err, target error) bool { return errors.Is(err, target) }

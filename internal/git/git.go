@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/VerifiedOrganic/onboard/internal/apperrors"
 )
 
 const gitCommandTimeout = 30 * time.Second
@@ -121,16 +123,16 @@ type FileDiff struct {
 // ValidateRef checks that ref is safe to pass to git and resolves to a commit.
 func ValidateRef(root, ref string) error {
 	if ref == "" {
-		return fmt.Errorf("empty git ref")
+		return fmt.Errorf("%w: empty ref", apperrors.ErrInvalidGitRef)
 	}
 	if strings.HasPrefix(ref, "-") {
-		return fmt.Errorf("git ref %q looks like a flag", ref)
+		return fmt.Errorf("%w: %q looks like a flag", apperrors.ErrInvalidGitRef, ref)
 	}
 	if strings.Contains(ref, "\x00") {
-		return fmt.Errorf("git ref contains null byte")
+		return fmt.Errorf("%w: null byte in ref", apperrors.ErrInvalidGitRef)
 	}
 	if !RefExists(root, ref) {
-		return fmt.Errorf("git ref %q does not resolve to a commit", ref)
+		return fmt.Errorf("%w: %q does not resolve to a commit", apperrors.ErrInvalidGitRef, ref)
 	}
 	return nil
 }
@@ -472,5 +474,12 @@ func run(ctx context.Context, root string, args ...string) (string, error) {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return string(out), ctx.Err()
 	}
-	return string(out), err
+	if err != nil {
+		combined := strings.TrimSpace(string(out) + " " + err.Error())
+		if strings.Contains(combined, "not a git repository") {
+			return string(out), fmt.Errorf("%w: %w", apperrors.ErrNotGitRepository, err)
+		}
+		return string(out), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return string(out), nil
 }
