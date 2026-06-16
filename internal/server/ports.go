@@ -10,22 +10,24 @@ import (
 
 // GitPort is the git operations MCP tools require.
 type GitPort interface {
-	Available(root string) bool
-	HeadSHA(root string) (string, error)
-	Branch(root string) (string, error)
+	Available(ctx context.Context, root string) bool
+	HeadSHA(ctx context.Context, root string) (string, error)
+	Branch(ctx context.Context, root string) (string, error)
 	DiffNameStatus(ctx context.Context, root, fromSHA string) ([]git.Change, error)
 	Diff(ctx context.Context, root, base string) ([]git.FileDiff, error)
 	History(ctx context.Context, root string, limit int) ([]git.FileStat, error)
-	ValidateRef(root, ref string) error
+	ValidateRef(ctx context.Context, root, ref string) error
 	ArchiveTree(ctx context.Context, root, ref, dst string) error
-	DefaultBase(root string) string
+	DefaultBase(ctx context.Context, root string) string
 }
 
 type gitPort struct{}
 
-func (gitPort) Available(root string) bool          { return git.Available(root) }
-func (gitPort) HeadSHA(root string) (string, error) { return git.HeadSHA(root) }
-func (gitPort) Branch(root string) (string, error)  { return git.Branch(root) }
+func (gitPort) Available(ctx context.Context, root string) bool { return git.Available(ctx, root) }
+func (gitPort) HeadSHA(ctx context.Context, root string) (string, error) {
+	return git.HeadSHA(ctx, root)
+}
+func (gitPort) Branch(ctx context.Context, root string) (string, error) { return git.Branch(ctx, root) }
 func (gitPort) DiffNameStatus(ctx context.Context, root, from string) ([]git.Change, error) {
 	return git.DiffNameStatus(ctx, root, from)
 }
@@ -35,21 +37,27 @@ func (gitPort) Diff(ctx context.Context, root, base string) ([]git.FileDiff, err
 func (gitPort) History(ctx context.Context, root string, limit int) ([]git.FileStat, error) {
 	return git.History(ctx, root, limit)
 }
-func (gitPort) ValidateRef(root, ref string) error { return git.ValidateRef(root, ref) }
+func (gitPort) ValidateRef(ctx context.Context, root, ref string) error {
+	return git.ValidateRef(ctx, root, ref)
+}
 func (gitPort) ArchiveTree(ctx context.Context, root, ref, dst string) error {
 	return git.ArchiveTree(ctx, root, ref, dst)
 }
-func (gitPort) DefaultBase(root string) string { return git.DefaultBase(root) }
+func (gitPort) DefaultBase(ctx context.Context, root string) string {
+	return git.DefaultBase(ctx, root)
+}
 
 // GuidePort reads and writes the SHA-tagged codebase guide cache.
 type GuidePort interface {
-	Read(root string) (guide.Guide, error)
-	Write(root, body, mode string) (string, error)
+	Read(ctx context.Context, root string) (guide.Guide, error)
+	Write(ctx context.Context, root, body, mode string) (string, error)
 }
 
 type guidePort struct{}
 
-func (guidePort) Read(root string) (guide.Guide, error) { return guide.Read(root) }
-func (guidePort) Write(root, body, mode string) (string, error) {
-	return guide.Write(root, body, mode, time.Now())
+func (guidePort) Read(ctx context.Context, root string) (guide.Guide, error) {
+	return guide.Read(ctx, root)
+}
+func (guidePort) Write(ctx context.Context, root, body, mode string) (string, error) {
+	return guide.Write(ctx, root, body, mode, time.Now())
 }

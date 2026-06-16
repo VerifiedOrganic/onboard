@@ -288,7 +288,7 @@ func fileChurnWithMax(ctx context.Context, root string, maxCommits int, refresh 
 
 	churn := map[string]int{}
 	deps := depsForContext(ctx)
-	if deps.Git.Available(root) {
+	if deps.Git.Available(ctx, root) {
 		if hist, err := deps.Git.History(ctx, root, maxCommits); err == nil {
 			for _, fs := range hist {
 				churn[filepath.ToSlash(fs.Path)] = fs.Commits

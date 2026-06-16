@@ -69,20 +69,20 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 		return out, err
 	}
 	deps := depsForContext(ctx)
-	if !deps.Git.Available(root) {
+	if !deps.Git.Available(ctx, root) {
 		out.Note = "Not a git repository — nothing to diff."
 		return out, nil
 	}
 
 	base := in.Base
 	if base == "" {
-		if base = deps.Git.DefaultBase(root); base == "" {
+		if base = deps.Git.DefaultBase(ctx, root); base == "" {
 			out.Note = "Could not detect a base branch (origin/main, main, master). Pass `base` (a branch, tag, or SHA) explicitly."
 			return out, nil
 		}
 	}
 	out.Base = base
-	if err := deps.Git.ValidateRef(root, base); err != nil {
+	if err := deps.Git.ValidateRef(ctx, root, base); err != nil {
 		out.Note = err.Error()
 		return out, nil
 	}

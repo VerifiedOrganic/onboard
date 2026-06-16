@@ -14,6 +14,8 @@ import (
 	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
+const graphIndexTimeout = 10 * time.Minute
+
 // Service indexes repositories with in-memory caching and optional semantic enrichment.
 type Service struct {
 	cache  *Cache
@@ -31,6 +33,9 @@ func DefaultService() *Service {
 
 // Index builds or returns a cached code graph for root. precise requests type-checked enrichment.
 func (s *Service) Index(ctx context.Context, root string, refresh, precise bool) (*providers.Graph, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	key := root
 	if precise {
 		key = root + "\x00precise"
@@ -45,36 +50,45 @@ func (s *Service) Index(ctx context.Context, root string, refresh, precise bool)
 	}
 
 	start := time.Now()
-	v, err, _ := s.group.Do(key, func() (any, error) {
+	ch := s.group.DoChan(key, func() (any, error) {
+		buildCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), graphIndexTimeout)
+		defer cancel()
 		if !refresh {
 			if g, ok := s.cache.Get(key); ok {
 				return g, nil
 			}
 		}
-		g, err := (indexer.Builtin{}).IndexWithCache(ctx, root, diskCachePath(root))
+		g, err := (indexer.Builtin{}).IndexWithCache(buildCtx, root, diskCachePath(buildCtx, root))
 		if err != nil {
 			return nil, err
 		}
 		if g.Files == 0 {
-			if ng, nerr := (indexer.Null{}).Index(ctx, root); nerr == nil && len(ng.Defs) > 0 {
+			if ng, nerr := (indexer.Null{}).Index(buildCtx, root); nerr == nil && len(ng.Defs) > 0 {
 				g = ng
 			}
 		}
 		if precise {
-			if _, err := precision.EnrichGo(ctx, root, g); err != nil && s.logger != nil {
+			if _, err := precision.EnrichGo(buildCtx, root, g); err != nil && s.logger != nil {
 				s.logger.Warn("go precision enrichment failed", "root", root, "err", err)
 			}
-			if _, err := precision.EnrichRust(ctx, root, g); err != nil && s.logger != nil {
+			if _, err := precision.EnrichRust(buildCtx, root, g); err != nil && s.logger != nil {
 				s.logger.Warn("rust precision enrichment failed", "root", root, "err", err)
 			}
 		}
 		s.cache.Store(key, g)
 		return g, nil
 	})
-	if err != nil {
-		return nil, err
+
+	var res singleflight.Result
+	select {
+	case res = <-ch:
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	g := v.(*providers.Graph)
+	if res.Err != nil {
+		return nil, res.Err
+	}
+	g := res.Val.(*providers.Graph)
 	if s.logger != nil {
 		s.logger.Info("graph indexed",
 			"root", root,
@@ -87,8 +101,8 @@ func (s *Service) Index(ctx context.Context, root string, refresh, precise bool)
 	return g, nil
 }
 
-func diskCachePath(root string) string {
-	dir, err := git.CommonDir(root)
+func diskCachePath(ctx context.Context, root string) string {
+	dir, err := git.CommonDir(ctx, root)
 	if err != nil {
 		return ""
 	}

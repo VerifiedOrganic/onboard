@@ -238,7 +238,7 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 	// Git churn hotspots: the files that change most are where understanding and risk
 	// concentrate, so point an onboarding reader at them first. Degrades silently outside
 	// a git work tree — the dedicated history tool gives the full view.
-	if deps.Git.Available(root) {
+	if deps.Git.Available(ctx, root) {
 		if hist, herr := deps.Git.History(ctx, root, reconHotspotCommits); herr == nil {
 			out.Hotspots = topHotspots(hist, 8)
 		}

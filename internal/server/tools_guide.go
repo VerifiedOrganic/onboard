@@ -65,7 +65,7 @@ func registerGuideTools(rt *serverRuntime, s *mcp.Server) {
 			return nil, guideReadOutput{}, err
 		}
 		deps := depsForContext(ctx)
-		g, err := deps.Guide.Read(root)
+		g, err := deps.Guide.Read(ctx, root)
 		if err != nil {
 			return nil, guideReadOutput{}, err
 		}
@@ -74,8 +74,8 @@ func registerGuideTools(rt *serverRuntime, s *mcp.Server) {
 			Branch: g.Header.Branch, Mode: g.Header.Mode,
 			Generated: g.Header.Generated, Body: g.Body,
 		}
-		if deps.Git.Available(root) {
-			out.HeadSHA, _ = deps.Git.HeadSHA(root)
+		if deps.Git.Available(ctx, root) {
+			out.HeadSHA, _ = deps.Git.HeadSHA(ctx, root)
 			out.Current = g.Exists && out.CachedSHA != "" && out.CachedSHA == out.HeadSHA
 		} else {
 			out.Note = "Not a git repository — delta updates and currency checks are unavailable."
@@ -96,12 +96,12 @@ func registerGuideTools(rt *serverRuntime, s *mcp.Server) {
 		if mode == "" {
 			mode = "full"
 		}
-		path, err := deps.Guide.Write(root, in.Body, mode)
+		path, err := deps.Guide.Write(ctx, root, in.Body, mode)
 		if err != nil {
 			return nil, guideWriteOutput{}, err
 		}
 		out := guideWriteOutput{Path: path}
-		out.SHA, _ = deps.Git.HeadSHA(root)
+		out.SHA, _ = deps.Git.HeadSHA(ctx, root)
 		if out.SHA == "" {
 			out.Note = "Not a git repository — guide written but not SHA-tagged; delta updates unavailable."
 		}
@@ -118,12 +118,12 @@ func registerGuideTools(rt *serverRuntime, s *mcp.Server) {
 		}
 		deps := depsForContext(ctx)
 		out := guideDeltaOutput{}
-		if !deps.Git.Available(root) {
+		if !deps.Git.Available(ctx, root) {
 			out.Note = "Not a git repository — cannot compute a delta; regenerate the guide in full."
 			return nil, out, nil
 		}
-		out.HeadSHA, _ = deps.Git.HeadSHA(root)
-		g, err := deps.Guide.Read(root)
+		out.HeadSHA, _ = deps.Git.HeadSHA(ctx, root)
+		g, err := deps.Guide.Read(ctx, root)
 		if err != nil {
 			return nil, out, err
 		}

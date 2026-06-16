@@ -1,6 +1,7 @@
 package guide
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,10 +40,11 @@ func initRepo(t *testing.T) string {
 
 func TestWriteReadRoundTrip(t *testing.T) {
 	repo := initRepo(t)
+	ctx := context.Background()
 	body := "# Codebase Guide\n\nSome analysis here.\n"
 	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
 
-	path, err := Write(repo, body, "full", now)
+	path, err := Write(ctx, repo, body, "full", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +53,7 @@ func TestWriteReadRoundTrip(t *testing.T) {
 		t.Errorf("guide path %q not inside .git", path)
 	}
 
-	g, err := Read(repo)
+	g, err := Read(ctx, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +76,7 @@ func TestWriteReadRoundTrip(t *testing.T) {
 
 func TestReadMissing(t *testing.T) {
 	repo := initRepo(t)
-	g, err := Read(repo)
+	g, err := Read(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,14 +87,14 @@ func TestReadMissing(t *testing.T) {
 
 func TestWriteRejectsUnknownMode(t *testing.T) {
 	repo := initRepo(t)
-	if _, err := Write(repo, "# Guide\n", "partial", time.Now()); err == nil {
+	if _, err := Write(context.Background(), repo, "# Guide\n", "partial", time.Now()); err == nil {
 		t.Fatal("expected unknown guide mode to be rejected")
 	}
 }
 
 func TestPathFallbackWithoutGit(t *testing.T) {
 	dir := t.TempDir() // not a git repo
-	p := Path(dir)
+	p := Path(context.Background(), dir)
 	if !strings.HasPrefix(p, dir) || !strings.Contains(p, ".onboard") {
 		t.Errorf("non-git path = %q, want it under <root>/.onboard", p)
 	}

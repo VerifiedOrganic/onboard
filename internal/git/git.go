@@ -28,18 +28,18 @@ const (
 )
 
 // Available reports whether git is on PATH and root is inside a work tree.
-func Available(root string) bool {
+func Available(ctx context.Context, root string) bool {
 	if _, err := exec.LookPath("git"); err != nil {
 		return false
 	}
-	out, err := run(context.Background(), root, "rev-parse", "--is-inside-work-tree")
+	out, err := run(ctx, root, "rev-parse", "--is-inside-work-tree")
 	return err == nil && strings.TrimSpace(out) == "true"
 }
 
 // CommonDir returns the absolute path of the repo's common git directory.
 // (Using the *common* dir keeps caches stable across worktrees.)
-func CommonDir(root string) (string, error) {
-	out, err := run(context.Background(), root, "rev-parse", "--git-common-dir")
+func CommonDir(ctx context.Context, root string) (string, error) {
+	out, err := run(ctx, root, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
@@ -51,14 +51,14 @@ func CommonDir(root string) (string, error) {
 }
 
 // HeadSHA returns the full commit SHA of HEAD.
-func HeadSHA(root string) (string, error) {
-	out, err := run(context.Background(), root, "rev-parse", "HEAD")
+func HeadSHA(ctx context.Context, root string) (string, error) {
+	out, err := run(ctx, root, "rev-parse", "HEAD")
 	return strings.TrimSpace(out), err
 }
 
 // Branch returns the current branch name (or "HEAD" when detached).
-func Branch(root string) (string, error) {
-	out, err := run(context.Background(), root, "rev-parse", "--abbrev-ref", "HEAD")
+func Branch(ctx context.Context, root string) (string, error) {
+	out, err := run(ctx, root, "rev-parse", "--abbrev-ref", "HEAD")
 	return strings.TrimSpace(out), err
 }
 
@@ -122,7 +122,7 @@ type FileDiff struct {
 }
 
 // ValidateRef checks that ref is safe to pass to git and resolves to a commit.
-func ValidateRef(root, ref string) error {
+func ValidateRef(ctx context.Context, root, ref string) error {
 	if ref == "" {
 		return fmt.Errorf("%w: empty ref", apperrors.ErrInvalidGitRef)
 	}
@@ -132,7 +132,7 @@ func ValidateRef(root, ref string) error {
 	if strings.Contains(ref, "\x00") {
 		return fmt.Errorf("%w: null byte in ref", apperrors.ErrInvalidGitRef)
 	}
-	if !RefExists(root, ref) {
+	if !RefExists(ctx, root, ref) {
 		return fmt.Errorf("%w: %q does not resolve to a commit", apperrors.ErrInvalidGitRef, ref)
 	}
 	return nil
@@ -142,7 +142,7 @@ func ValidateRef(root, ref string) error {
 // uncommitted work since base, for tracked files (untracked files are not shown by git
 // diff). unified=0 keeps the hunks tight so they attribute to symbols precisely.
 func Diff(ctx context.Context, root, base string) ([]FileDiff, error) {
-	if err := ValidateRef(root, base); err != nil {
+	if err := ValidateRef(ctx, root, base); err != nil {
 		return nil, err
 	}
 	out, err := run(ctx, root, "diff", "--unified=0", "--no-color", "--find-renames", base, "--")
@@ -155,7 +155,7 @@ func Diff(ctx context.Context, root, base string) ([]FileDiff, error) {
 // ArchiveTree materializes ref into dst using `git archive`. It is intended for read-only
 // analysis of base-side state, such as computing the blast radius of deleted symbols.
 func ArchiveTree(ctx context.Context, root, ref, dst string) error {
-	if err := ValidateRef(root, ref); err != nil {
+	if err := ValidateRef(ctx, root, ref); err != nil {
 		return err
 	}
 	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
@@ -324,24 +324,24 @@ func parseHunkHeader(line string) (Hunk, bool) {
 }
 
 // RefExists reports whether ref resolves to a commit.
-func RefExists(root, ref string) bool {
-	_, err := run(context.Background(), root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+func RefExists(ctx context.Context, root, ref string) bool {
+	_, err := run(ctx, root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 	return err == nil
 }
 
 // MergeBase returns the best common ancestor of HEAD and ref, or "" with an error.
-func MergeBase(root, ref string) (string, error) {
-	out, err := run(context.Background(), root, "merge-base", "HEAD", ref)
+func MergeBase(ctx context.Context, root, ref string) (string, error) {
+	out, err := run(ctx, root, "merge-base", "HEAD", ref)
 	return strings.TrimSpace(out), err
 }
 
 // DefaultBase picks a sensible review base: the merge-base of HEAD with the first of
 // origin/main, main, origin/master, master that exists. Returns "" if none resolve (e.g.
 // a repo with no default branch), leaving the caller to ask for an explicit base.
-func DefaultBase(root string) string {
+func DefaultBase(ctx context.Context, root string) string {
 	for _, ref := range []string{"origin/main", "main", "origin/master", "master"} {
-		if RefExists(root, ref) {
-			if mb, err := MergeBase(root, ref); err == nil && mb != "" {
+		if RefExists(ctx, root, ref) {
+			if mb, err := MergeBase(ctx, root, ref); err == nil && mb != "" {
 				return mb
 			}
 		}

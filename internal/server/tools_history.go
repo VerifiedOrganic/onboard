@@ -31,7 +31,7 @@ func history(ctx context.Context, in historyInput) (historyOutput, error) {
 		return out, err
 	}
 	deps := depsForContext(ctx)
-	if !deps.Git.Available(root) {
+	if !deps.Git.Available(ctx, root) {
 		out.Note = "Not a git repository — no history signals available."
 		return out, nil
 	}
