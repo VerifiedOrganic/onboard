@@ -10,8 +10,6 @@ import (
 // A focused reader for SQL DDL — just enough to turn CREATE TABLE statements into the
 // entities, columns, and primary/foreign keys the schema tool renders.
 
-const maxSchemaFiles = 200
-
 // Column is one column on a parsed entity.
 type Column struct {
 	Name string `json:"name"`

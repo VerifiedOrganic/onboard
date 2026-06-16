@@ -6,6 +6,7 @@ import (
 )
 
 func TestResolveTargetsMutualExclusion(t *testing.T) {
+	resetCLIState(t)
 	_, err := resolveTargets("claude", true, "onboard install --help")
 	if err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Fatalf("err = %v, want mutual exclusion", err)

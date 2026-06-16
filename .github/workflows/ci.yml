@@ -17,7 +17,14 @@ jobs:
         with:
           go-version: "1.26"
       - run: go vet ./...
-      - run: go test -race -coverprofile=coverage.out ./...
+      - run: go test -race ./...
+      - name: Coverage gate
+        run: |
+          pkgs=$(go list ./cmd/... ./internal/... | grep -v precision)
+          go test -coverprofile=coverage.out $pkgs
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/,"",$3); print $3}')
+          echo "total coverage (excl. precision toolchain): ${pct}%"
+          awk -v p="$pct" 'BEGIN { if (p+0 < 65) { print "coverage below 65% floor"; exit 1 } }'
 
   lint:
     runs-on: ubuntu-latest
