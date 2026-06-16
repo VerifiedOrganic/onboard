@@ -130,11 +130,18 @@ func Find(name string) (Agent, error) {
 	return Agent{}, fmt.Errorf("unknown agent %q (known: claude, codex, grok, kimi, opencode, cursor, copilot, junie)", name)
 }
 
-// Detected reports whether the agent appears installed (its config or skills
-// parent directory exists). Used by --all to avoid creating dirs for absent agents.
+// Detected reports whether the agent appears installed (its config exists or its
+// agent-specific skills/config directory exists). Used by --all to avoid creating
+// dirs for absent agents.
 func Detected(a Agent) bool {
+	if a.ConfigPath != "" && exists(a.ConfigPath) {
+		return true
+	}
 	if a.SkillsDir != "" && exists(filepath.Dir(a.SkillsDir)) {
 		return true
+	}
+	if a.SkillsDir != "" {
+		return false
 	}
 	return exists(filepath.Dir(a.ConfigPath))
 }

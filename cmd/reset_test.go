@@ -1,9 +1,18 @@
 package cmd
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func resetCLIState(t *testing.T) {
 	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("COPILOT_HOME", filepath.Join(home, ".copilot"))
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, ".kimi-code"))
 	rootCmd.SetArgs(nil)
 	doctorAgent = ""
 	initDryRun = false

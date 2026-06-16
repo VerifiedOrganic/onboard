@@ -426,6 +426,25 @@ func TestDetected(t *testing.T) {
 	}
 }
 
+func TestDetectedDoesNotTreatHomeAsAgentInstall(t *testing.T) {
+	home := t.TempDir()
+	claude := Agent{
+		Name:       "claude",
+		SkillsDir:  filepath.Join(home, ".claude", "skills"),
+		ConfigPath: filepath.Join(home, ".claude.json"),
+		Shape:      ShapeJSONMCPServers,
+	}
+	if Detected(claude) {
+		t.Fatal("Detected should be false when only the home directory exists")
+	}
+	if err := os.Mkdir(filepath.Join(home, ".claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if !Detected(claude) {
+		t.Fatal("Detected should be true when the agent-specific directory exists")
+	}
+}
+
 func TestRegistryShapes(t *testing.T) {
 	all, err := Registry()
 	if err != nil {
