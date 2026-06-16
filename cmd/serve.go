@@ -41,14 +41,17 @@ and network controls. Set --http-token or ONBOARD_HTTP_TOKEN to require a bearer
 		s := server.New(version)
 
 		if serveHTTP != "" {
-			mcpHandler := mcp.NewStreamableHTTPHandler(
-				func(*http.Request) *mcp.Server { return s },
-				nil, // default options: stateful sessions, localhost protection on
-			)
 			token := serveHTTPToken
 			if token == "" {
 				token = os.Getenv("ONBOARD_HTTP_TOKEN")
 			}
+			if token == "" {
+				return fmt.Errorf("HTTP mode requires --http-token or ONBOARD_HTTP_TOKEN")
+			}
+			mcpHandler := mcp.NewStreamableHTTPHandler(
+				func(*http.Request) *mcp.Server { return s },
+				nil, // default options: stateful sessions, localhost protection on
+			)
 			metrics := &httpMetrics{}
 			logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 			handler := observedHTTPHandler(mcpHandler, token, serveHTTPMaxBodyMB*1024*1024, metrics, logger)
