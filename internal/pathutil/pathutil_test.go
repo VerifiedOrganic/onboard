@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/VerifiedOrganic/onboard/internal/apperrors"
 	"github.com/VerifiedOrganic/onboard/internal/pathutil"
 )
 
@@ -27,6 +28,9 @@ func TestJoinUnderRootRejectsEscape(t *testing.T) {
 	_, err := pathutil.JoinUnderRoot(root, "../outside")
 	if err == nil {
 		t.Fatal("expected escape error")
+	}
+	if !apperrors.Is(err, apperrors.ErrPathEscapesRoot) {
+		t.Fatalf("err = %v, want ErrPathEscapesRoot", err)
 	}
 }
 

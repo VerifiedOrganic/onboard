@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/VerifiedOrganic/onboard/internal/apperrors"
 )
 
 // ResolveRoot returns the absolute directory to index. An empty root defaults to cwd.
@@ -26,7 +28,7 @@ func ResolveRoot(root string) (string, error) {
 		return "", fmt.Errorf("resolve root: %w", err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("root %q is not a directory", abs)
+		return "", fmt.Errorf("%w: %q", apperrors.ErrRootNotDirectory, abs)
 	}
 	return abs, nil
 }
@@ -47,7 +49,7 @@ func JoinUnderRoot(root, rel string) (string, error) {
 		return "", err
 	}
 	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q escapes repo root %q", rel, root)
+		return "", fmt.Errorf("%w: %q escapes repo root %q", apperrors.ErrPathEscapesRoot, rel, root)
 	}
 	return abs, nil
 }

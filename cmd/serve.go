@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,7 +32,13 @@ and network controls. Set --http-token or ONBOARD_HTTP_TOKEN to require a bearer
 	RunE: func(_ *cobra.Command, _ []string) error {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		s := server.New(version)
+		var opts []server.Option
+		if serveHTTP != "" {
+			wd, _ := os.Getwd()
+			opts = append(opts, server.WithRootPolicy(transport.RootPolicyFromEnv(wd)))
+			opts = append(opts, server.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil))))
+		}
+		s := server.New(version, opts...)
 
 		if serveHTTP != "" {
 			token := serveHTTPToken
