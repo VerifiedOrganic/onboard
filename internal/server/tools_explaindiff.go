@@ -85,7 +85,7 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 		return out, nil
 	}
 
-	diffs, err := git.Diff(root, base)
+	diffs, err := git.Diff(ctx, root, base)
 	if err != nil {
 		return out, err
 	}

@@ -6,6 +6,7 @@ package git
 import (
 	"archive/tar"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,14 +29,14 @@ func Available(root string) bool {
 	if _, err := exec.LookPath("git"); err != nil {
 		return false
 	}
-	out, err := run(root, "rev-parse", "--is-inside-work-tree")
+	out, err := run(context.Background(), root, "rev-parse", "--is-inside-work-tree")
 	return err == nil && strings.TrimSpace(out) == "true"
 }
 
 // CommonDir returns the absolute path of the repo's common git directory.
 // (Using the *common* dir keeps caches stable across worktrees.)
 func CommonDir(root string) (string, error) {
-	out, err := run(root, "rev-parse", "--git-common-dir")
+	out, err := run(context.Background(), root, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
@@ -48,13 +49,13 @@ func CommonDir(root string) (string, error) {
 
 // HeadSHA returns the full commit SHA of HEAD.
 func HeadSHA(root string) (string, error) {
-	out, err := run(root, "rev-parse", "HEAD")
+	out, err := run(context.Background(), root, "rev-parse", "HEAD")
 	return strings.TrimSpace(out), err
 }
 
 // Branch returns the current branch name (or "HEAD" when detached).
 func Branch(root string) (string, error) {
-	out, err := run(root, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := run(context.Background(), root, "rev-parse", "--abbrev-ref", "HEAD")
 	return strings.TrimSpace(out), err
 }
 
@@ -66,8 +67,8 @@ type Change struct {
 }
 
 // DiffNameStatus returns the files changed from fromSHA to HEAD.
-func DiffNameStatus(root, fromSHA string) ([]Change, error) {
-	out, err := run(root, "diff", "--name-status", "-z", fromSHA+"..HEAD")
+func DiffNameStatus(ctx context.Context, root, fromSHA string) ([]Change, error) {
+	out, err := run(ctx, root, "diff", "--name-status", "-z", fromSHA+"..HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -137,11 +138,11 @@ func ValidateRef(root, ref string) error {
 // Diff returns the per-file changes between base and the working tree — committed *and*
 // uncommitted work since base, for tracked files (untracked files are not shown by git
 // diff). unified=0 keeps the hunks tight so they attribute to symbols precisely.
-func Diff(root, base string) ([]FileDiff, error) {
+func Diff(ctx context.Context, root, base string) ([]FileDiff, error) {
 	if err := ValidateRef(root, base); err != nil {
 		return nil, err
 	}
-	out, err := run(root, "diff", "--unified=0", "--no-color", "--find-renames", base, "--")
+	out, err := run(ctx, root, "diff", "--unified=0", "--no-color", "--find-renames", base, "--")
 	if err != nil {
 		return nil, err
 	}
@@ -321,13 +322,13 @@ func parseHunkHeader(line string) (Hunk, bool) {
 
 // RefExists reports whether ref resolves to a commit.
 func RefExists(root, ref string) bool {
-	_, err := run(root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	_, err := run(context.Background(), root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 	return err == nil
 }
 
 // MergeBase returns the best common ancestor of HEAD and ref, or "" with an error.
 func MergeBase(root, ref string) (string, error) {
-	out, err := run(root, "merge-base", "HEAD", ref)
+	out, err := run(context.Background(), root, "merge-base", "HEAD", ref)
 	return strings.TrimSpace(out), err
 }
 
@@ -360,13 +361,13 @@ type FileStat struct {
 // recent maxCommits commits (0 = all history). Merge commits are excluded. The result
 // is sorted by churn (commit count) descending, then path. High-churn, multi-author
 // files are onboarding hotspots and prime risk-audit targets.
-func History(root string, maxCommits int) ([]FileStat, error) {
+func History(ctx context.Context, root string, maxCommits int) ([]FileStat, error) {
 	// \x1f-delimited header per commit, then numstat lines: "<adds>\t<dels>\t<path>".
 	args := []string{"log", "--no-merges", "--numstat", "--format=\x1f%an\x1f%aI"}
 	if maxCommits > 0 {
 		args = append(args, fmt.Sprintf("-n%d", maxCommits))
 	}
-	out, err := run(root, args...)
+	out, err := run(ctx, root, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -456,14 +457,20 @@ func renameTarget(p string) string {
 	return p
 }
 
-func run(root string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+func run(ctx context.Context, root string, args ...string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
 	defer cancel()
 	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	out, err := cmd.Output()
-	if ctx.Err() == context.DeadlineExceeded {
-		return string(out), fmt.Errorf("git %s timed out after %s", strings.Join(args, " "), gitCommandTimeout)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return string(out), fmt.Errorf("git %s timed out after %s: %w", strings.Join(args, " "), gitCommandTimeout, ctx.Err())
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return string(out), ctx.Err()
 	}
 	return string(out), err
 }

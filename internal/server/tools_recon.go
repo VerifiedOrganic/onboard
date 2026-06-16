@@ -237,7 +237,7 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 	// concentrate, so point an onboarding reader at them first. Degrades silently outside
 	// a git work tree — the dedicated history tool gives the full view.
 	if git.Available(root) {
-		if hist, herr := git.History(root, reconHotspotCommits); herr == nil {
+		if hist, herr := git.History(ctx, root, reconHotspotCommits); herr == nil {
 			out.Hotspots = topHotspots(hist, 8)
 		}
 	}

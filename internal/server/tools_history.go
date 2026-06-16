@@ -24,7 +24,7 @@ type historyOutput struct {
 	Note       string         `json:"note,omitempty"`
 }
 
-func history(_ context.Context, in historyInput) (historyOutput, error) {
+func history(ctx context.Context, in historyInput) (historyOutput, error) {
 	out := historyOutput{}
 	root, err := resolveRoot(in.Root)
 	if err != nil {
@@ -44,7 +44,7 @@ func history(_ context.Context, in historyInput) (historyOutput, error) {
 		maxCommits = 0 // git.History treats 0 as unbounded
 	}
 
-	files, err := git.History(root, maxCommits)
+	files, err := git.History(ctx, root, maxCommits)
 	if err != nil {
 		return out, err
 	}

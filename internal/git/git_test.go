@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,7 +95,7 @@ func TestDiffNameStatus(t *testing.T) {
 	commit(t, repo, "space name.txt", "spaced\n", "add spaced name")
 	commit(t, repo, "a.txt", "changed\n", "modify a")
 
-	changes, err := DiffNameStatus(repo, from)
+	changes, err := DiffNameStatus(context.Background(), repo, from)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +115,7 @@ func TestDiffNameStatus(t *testing.T) {
 
 	// No changes from HEAD to HEAD.
 	head, _ := HeadSHA(repo)
-	if c, _ := DiffNameStatus(repo, head); len(c) != 0 {
+	if c, _ := DiffNameStatus(context.Background(), repo, head); len(c) != 0 {
 		t.Errorf("expected no changes from HEAD..HEAD, got %v", c)
 	}
 }
@@ -205,7 +206,7 @@ func TestDiffAndDefaultBase(t *testing.T) {
 	commit(t, repo, "feature.go", "package p\nfunc New() {}\n", "add feature")
 	commit(t, repo, "a.txt", "one\ntwo\n", "extend a")
 
-	diffs, err := Diff(repo, base)
+	diffs, err := Diff(context.Background(), repo, base)
 	if err != nil {
 		t.Fatal(err)
 	}

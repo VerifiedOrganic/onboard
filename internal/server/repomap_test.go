@@ -116,12 +116,12 @@ func TestRepoMapBlendsChurnByDefault(t *testing.T) {
 
 func TestFileChurnCacheReturnsCopies(t *testing.T) {
 	root := gitGraphFixture(t)
-	first := fileChurn(root, true)
+	first := fileChurn(context.Background(), root, true)
 	if first["util.go"] != 6 {
 		t.Fatalf("util.go churn = %d, want 6", first["util.go"])
 	}
 	first["util.go"] = 0
-	second := fileChurn(root, false)
+	second := fileChurn(context.Background(), root, false)
 	if second["util.go"] != 6 {
 		t.Fatalf("cached churn was mutated through caller map: got %d, want 6", second["util.go"])
 	}

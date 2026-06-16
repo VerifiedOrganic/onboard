@@ -95,7 +95,7 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 	}
 	churn := map[string]int{}
 	if weight > 0 {
-		churn = fileChurn(root, in.Refresh)
+		churn = fileChurn(ctx, root, in.Refresh)
 	}
 	blended := weight > 0 && len(churn) > 0
 
@@ -257,11 +257,11 @@ var churnCache = struct {
 // fileChurn returns per-file commit counts keyed by slash-normalized repo-relative path,
 // or an empty map outside a git work tree (so callers degrade cleanly to no churn signal).
 // Shared by repo_map's ranking blend and context_pack's relevance scoring.
-func fileChurn(root string, refresh bool) map[string]int {
-	return fileChurnWithMax(root, churnScanCommits, refresh)
+func fileChurn(ctx context.Context, root string, refresh bool) map[string]int {
+	return fileChurnWithMax(ctx, root, churnScanCommits, refresh)
 }
 
-func fileChurnWithMax(root string, maxCommits int, refresh bool) map[string]int {
+func fileChurnWithMax(ctx context.Context, root string, maxCommits int, refresh bool) map[string]int {
 	key := fmt.Sprintf("%s\x00%d", root, maxCommits)
 	now := time.Now()
 	if !refresh {
@@ -276,7 +276,7 @@ func fileChurnWithMax(root string, maxCommits int, refresh bool) map[string]int 
 
 	churn := map[string]int{}
 	if git.Available(root) {
-		if hist, err := git.History(root, maxCommits); err == nil {
+		if hist, err := git.History(ctx, root, maxCommits); err == nil {
 			for _, fs := range hist {
 				churn[filepath.ToSlash(fs.Path)] = fs.Commits
 			}
