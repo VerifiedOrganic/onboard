@@ -202,20 +202,7 @@ func diffBaseGraph(ctx context.Context, root, base string, precise bool) (*provi
 	if err := git.ArchiveTree(ctx, root, base, tmp); err != nil {
 		return nil, err
 	}
-	g, err := (providers.Builtin{}).Index(ctx, tmp)
-	if err != nil {
-		return nil, err
-	}
-	if g.Files == 0 {
-		if ng, nerr := (providers.Null{}).Index(ctx, tmp); nerr == nil && len(ng.Defs) > 0 {
-			g = ng
-		}
-	}
-	if precise {
-		_, _ = providers.EnrichGo(ctx, tmp, g)
-		_, _ = providers.EnrichRust(ctx, tmp, g)
-	}
-	return g, nil
+	return serverDeps.Graph.Index(ctx, tmp, true, precise)
 }
 
 func deletedFileSymbols(g *providers.Graph, path string) []*providers.Symbol {

@@ -1,150 +1,15 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/VerifiedOrganic/onboard/internal/git"
 	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
-// Shared code-graph indexing used by every graph-backed tool (trace_flow, impact, repo_map,
-// context_pack, render_map): a per-root in-memory cache, per-key locking, the persistent
-// on-disk index path, optional type-checked enrichment, and the small honesty/classification
-// helpers the tools share. Kept here, not in any one tool's file, because it is cross-cutting.
-
-// Indexing walks the whole repo, so cache recent graphs per root/key. Callers pass
-// refresh=true to rebuild after the tree changes.
-var (
-	graphCacheMu sync.Mutex
-	graphCache   = map[string]graphCacheEntry{}
-	graphLocks   = map[string]*sync.Mutex{}
-)
-
-const (
-	graphCacheMaxEntries = 32
-	graphCacheTTL        = 30 * time.Minute
-)
-
-type graphCacheEntry struct {
-	graph    *providers.Graph
-	lastUsed time.Time
-}
-
-func cachedGraph(root string) (*providers.Graph, bool) {
-	graphCacheMu.Lock()
-	defer graphCacheMu.Unlock()
-	e, ok := graphCache[root]
-	if !ok {
-		return nil, false
-	}
-	now := time.Now()
-	if now.Sub(e.lastUsed) > graphCacheTTL {
-		delete(graphCache, root)
-		delete(graphLocks, root)
-		return nil, false
-	}
-	e.lastUsed = now
-	graphCache[root] = e
-	return e.graph, true
-}
-
-func rootLock(root string) *sync.Mutex {
-	graphCacheMu.Lock()
-	defer graphCacheMu.Unlock()
-	l := graphLocks[root]
-	if l == nil {
-		l = &sync.Mutex{}
-		graphLocks[root] = l
-	}
-	return l
-}
-
-func storeGraph(root string, g *providers.Graph) {
-	graphCacheMu.Lock()
-	defer graphCacheMu.Unlock()
-	now := time.Now()
-	graphCache[root] = graphCacheEntry{graph: g, lastUsed: now}
-	for key, entry := range graphCache {
-		if now.Sub(entry.lastUsed) > graphCacheTTL {
-			delete(graphCache, key)
-			delete(graphLocks, key)
-		}
-	}
-	for len(graphCache) > graphCacheMaxEntries {
-		var oldestKey string
-		var oldest time.Time
-		for key, entry := range graphCache {
-			if oldestKey == "" || entry.lastUsed.Before(oldest) {
-				oldestKey = key
-				oldest = entry.lastUsed
-			}
-		}
-		delete(graphCache, oldestKey)
-		delete(graphLocks, oldestKey)
-	}
-}
-
-func indexGraph(ctx context.Context, root string, refresh, precise bool) (*providers.Graph, error) {
-	// The precise (type-checked) graph is a superset of the syntactic one, so cache it under
-	// a distinct key — a non-precise caller must never get charged for, nor accidentally
-	// receive, the heavier enriched graph, and vice versa.
-	key := root
-	if precise {
-		key = root + "\x00precise"
-	}
-	if !refresh {
-		if g, ok := cachedGraph(key); ok {
-			return g, nil
-		}
-	}
-	// Serialize indexing PER KEY so concurrent calls for the same repo don't
-	// duplicate the walk — without the old global lock that blocked cache hits and
-	// unrelated repos for the entire multi-second Index.
-	l := rootLock(key)
-	l.Lock()
-	defer l.Unlock()
-	if !refresh {
-		if g, ok := cachedGraph(key); ok { // another goroutine may have built it
-			return g, nil
-		}
-	}
-	g, err := (providers.Builtin{}).IndexWithCache(ctx, root, graphCachePath(root))
-	if err != nil {
-		return nil, err
-	}
-	// If tree-sitter matched nothing, fall back to the definitions-only provider
-	// so the user at least gets a symbol list rather than an empty result.
-	if g.Files == 0 {
-		if ng, nerr := (providers.Null{}).Index(ctx, root); nerr == nil && len(ng.Defs) > 0 {
-			g = ng
-		}
-	}
-	// Optional semantic enrichment. Safe to mutate g in place: it was just built here and
-	// is not yet shared. Non-fatal — missing language toolchains leave g syntactic.
-	if precise {
-		_, _ = providers.EnrichGo(ctx, root, g)
-		_, _ = providers.EnrichRust(ctx, root, g)
-	}
-	storeGraph(key, g)
-	return g, nil
-}
-
-// graphCachePath returns where the persistent per-file index lives, or "" to disable
-// persistence. In a git repo it sits inside the common git dir (alongside the guide
-// cache) so it is never committed; outside a repo we skip persistence rather than
-// litter an untracked working tree with a .onboard directory on every graph query.
-func graphCachePath(root string) string {
-	dir, err := git.CommonDir(root)
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, "onboard-graph.json")
-}
+// Shared graph honesty helpers used by every graph-backed tool (trace_flow, impact,
+// repo_map, context_pack, render_map). Indexing lives in internal/graph.
 
 // edgeCaveat returns the honesty caveat for a graph's call edges, upgraded when a precision
 // layer has proven some of them.
