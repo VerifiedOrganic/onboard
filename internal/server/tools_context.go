@@ -351,8 +351,5 @@ func registerContextPackTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "context_pack",
 		Description: "Assemble a ranked, token-budgeted bundle of the source most relevant to a seed symbol or file — retrieval-augmented context with no embedding model. Relevance is call-graph proximity to the seed (callers and callees), refined by centrality and git churn. Use to load 'everything I need to understand or change X' in one shot.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in contextPackInput) (*mcp.CallToolResult, contextPackOutput, error) {
-		out, err := contextPack(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("context_pack", contextPack))
 }

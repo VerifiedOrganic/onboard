@@ -427,8 +427,5 @@ func registerDeadCodeTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "dead_code",
 		Description: "Find callable definitions (functions and methods) that nothing in the repo calls — a lead for code that was written but never wired in (common in fast/AI builds). Ranked by confidence; excludes entry points and tests. Leads, not proof: reflection, codegen, framework registration, and external importers can hide callers (pass precise:true for Go or Rust semantic enrichment when available).",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in deadCodeInput) (*mcp.CallToolResult, deadCodeOutput, error) {
-		out, err := deadCode(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("dead_code", deadCode))
 }

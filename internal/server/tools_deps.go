@@ -146,8 +146,5 @@ func registerDepsTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "deps",
 		Description: "Extract the external dependency graph from a repo's manifests (go.mod, package.json, requirements.txt, Cargo.toml, Terraform required_providers + lock files, external module sources) — direct dependencies with declared versions per manifest, optionally as a Mermaid flowchart. Facts read from manifests, not inferred. Use to ground a dependency diagram or answer 'what does this project depend on'.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in depsInput) (*mcp.CallToolResult, depsOutput, error) {
-		out, err := depsExtract(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("deps", depsExtract))
 }

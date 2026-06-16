@@ -43,8 +43,5 @@ func registerRoutesTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "routes",
 		Description: "Extract the HTTP API surface — method, path, and source location for each route — from common framework registration patterns (Go chi/gin/echo/gorilla/net-http, Express, Flask, FastAPI). A recall-oriented heuristic across frameworks, not a parser. Use to map a service's endpoints.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in routesInput) (*mcp.CallToolResult, routesOutput, error) {
-		out, err := routesExtract(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("routes", routesExtract))
 }

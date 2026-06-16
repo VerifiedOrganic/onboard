@@ -11,8 +11,6 @@ import (
 	"time"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/VerifiedOrganic/onboard/internal/git"
 )
 
 // repo_map ranks the codebase by call-graph centrality (PageRank) and returns a
@@ -275,8 +273,8 @@ func fileChurnWithMax(ctx context.Context, root string, maxCommits int, refresh 
 	}
 
 	churn := map[string]int{}
-	if git.Available(root) {
-		if hist, err := git.History(ctx, root, maxCommits); err == nil {
+	if serverDeps.Git.Available(root) {
+		if hist, err := serverDeps.Git.History(ctx, root, maxCommits); err == nil {
 			for _, fs := range hist {
 				churn[filepath.ToSlash(fs.Path)] = fs.Commits
 			}
@@ -321,8 +319,5 @@ func registerRepoMapTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "repo_map",
 		Description: "Rank the codebase by call-graph centrality (PageRank), blended with git churn when available, and return a compact, token-budgeted map of the most important symbols — the heavily-relied-upon, actively-changing core. Load it first for orientation. Pass focus (symbols/files) to bias the ranking toward an area you care about, or churn_weight to tune how much commit frequency matters.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in repoMapInput) (*mcp.CallToolResult, repoMapOutput, error) {
-		out, err := repoMap(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("repo_map", repoMap))
 }

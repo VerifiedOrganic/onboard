@@ -15,7 +15,7 @@ type GitPort interface {
 	Branch(root string) (string, error)
 	DiffNameStatus(ctx context.Context, root, fromSHA string) ([]git.Change, error)
 	Diff(ctx context.Context, root, base string) ([]git.FileDiff, error)
-	History(ctx context.Context, root string, maxCommits int) ([]git.FileStat, error)
+	History(ctx context.Context, root string, limit int) ([]git.FileStat, error)
 	ValidateRef(root, ref string) error
 	ArchiveTree(ctx context.Context, root, ref, dst string) error
 	DefaultBase(root string) string
@@ -23,17 +23,17 @@ type GitPort interface {
 
 type gitPort struct{}
 
-func (gitPort) Available(root string) bool                      { return git.Available(root) }
-func (gitPort) HeadSHA(root string) (string, error)             { return git.HeadSHA(root) }
-func (gitPort) Branch(root string) (string, error)              { return git.Branch(root) }
+func (gitPort) Available(root string) bool          { return git.Available(root) }
+func (gitPort) HeadSHA(root string) (string, error) { return git.HeadSHA(root) }
+func (gitPort) Branch(root string) (string, error)  { return git.Branch(root) }
 func (gitPort) DiffNameStatus(ctx context.Context, root, from string) ([]git.Change, error) {
 	return git.DiffNameStatus(ctx, root, from)
 }
 func (gitPort) Diff(ctx context.Context, root, base string) ([]git.FileDiff, error) {
 	return git.Diff(ctx, root, base)
 }
-func (gitPort) History(ctx context.Context, root string, max int) ([]git.FileStat, error) {
-	return git.History(ctx, root, max)
+func (gitPort) History(ctx context.Context, root string, limit int) ([]git.FileStat, error) {
+	return git.History(ctx, root, limit)
 }
 func (gitPort) ValidateRef(root, ref string) error { return git.ValidateRef(root, ref) }
 func (gitPort) ArchiveTree(ctx context.Context, root, ref, dst string) error {

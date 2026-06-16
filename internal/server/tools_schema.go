@@ -91,8 +91,5 @@ func registerSchemaTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "schema",
 		Description: "Extract a database schema from SQL DDL (CREATE TABLE statements in .sql files / migrations): entities with columns and primary/foreign keys, the relationships between them, and a Mermaid erDiagram. Facts parsed from the DDL, not inferred. Use to ground an ERD or understand the data model.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in schemaInput) (*mcp.CallToolResult, schemaOutput, error) {
-		out, err := schemaExtract(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("schema", schemaExtract))
 }

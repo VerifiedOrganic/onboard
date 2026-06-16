@@ -30,7 +30,7 @@ func history(ctx context.Context, in historyInput) (historyOutput, error) {
 	if err != nil {
 		return out, err
 	}
-	if !git.Available(root) {
+	if !serverDeps.Git.Available(root) {
 		out.Note = "Not a git repository — no history signals available."
 		return out, nil
 	}
@@ -44,7 +44,7 @@ func history(ctx context.Context, in historyInput) (historyOutput, error) {
 		maxCommits = 0 // git.History treats 0 as unbounded
 	}
 
-	files, err := git.History(ctx, root, maxCommits)
+	files, err := serverDeps.Git.History(ctx, root, maxCommits)
 	if err != nil {
 		return out, err
 	}
@@ -68,8 +68,5 @@ func registerHistoryTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "history",
 		Description: "Surface git change-history signals: the files with the most churn (commit count), their additions/deletions, last-changed date, and distinct author count. High-churn, multi-author files are onboarding hotspots and prime risk-audit targets. Requires a git repository.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in historyInput) (*mcp.CallToolResult, historyOutput, error) {
-		out, err := history(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("history", history))
 }

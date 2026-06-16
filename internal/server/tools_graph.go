@@ -277,16 +277,10 @@ func registerGraphTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "trace_flow",
 		Description: "Trace an execution flow from an entry symbol through its callees (breadth-first to a depth). Use to follow a request/operation end to end. Backed by a syntactic call graph.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in traceFlowInput) (*mcp.CallToolResult, traceFlowOutput, error) {
-		out, err := traceFlow(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("trace_flow", traceFlow))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "impact",
 		Description: "Compute the blast radius of changing a symbol: direct callers, all transitive callers, and which of those are tests. Use to answer 'what breaks if I change X' before editing.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in impactInput) (*mcp.CallToolResult, impactOutput, error) {
-		out, err := impactAnalysis(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("impact", impactAnalysis))
 }

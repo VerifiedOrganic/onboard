@@ -284,8 +284,5 @@ func registerMapTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "render_map",
 		Description: "Render a navigable map of the codebase. With explicit nodes/edges it renders exactly those; otherwise it derives a package-level dependency map from the code graph. Format 'html' produces a self-contained interactive file (Mermaid + pan/zoom + click-to-detail); 'mermaid' produces diagram-as-code suitable for committing.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in renderMapInput) (*mcp.CallToolResult, renderMapOutput, error) {
-		out, err := renderMap(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("render_map", renderMap))
 }

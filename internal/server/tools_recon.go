@@ -71,7 +71,7 @@ func registerReconTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "recon",
 		Description: "Phase-1 reconnaissance: detect stack, frameworks, entry points, test layout, tooling, a pruned directory tree, and (in a git repo) the highest-churn hotspot files for a repository. A fast structural scan — reads no source beyond manifest filenames.",
-	}, recon)
+	}, withToolLog("recon", recon))
 }
 
 func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.CallToolResult, reconOutput, error) {
@@ -236,8 +236,8 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 	// Git churn hotspots: the files that change most are where understanding and risk
 	// concentrate, so point an onboarding reader at them first. Degrades silently outside
 	// a git work tree — the dedicated history tool gives the full view.
-	if git.Available(root) {
-		if hist, herr := git.History(ctx, root, reconHotspotCommits); herr == nil {
+	if serverDeps.Git.Available(root) {
+		if hist, herr := serverDeps.Git.History(ctx, root, reconHotspotCommits); herr == nil {
 			out.Hotspots = topHotspots(hist, 8)
 		}
 	}

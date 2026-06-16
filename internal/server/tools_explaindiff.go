@@ -67,25 +67,25 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 	if err != nil {
 		return out, err
 	}
-	if !git.Available(root) {
+	if !serverDeps.Git.Available(root) {
 		out.Note = "Not a git repository — nothing to diff."
 		return out, nil
 	}
 
 	base := in.Base
 	if base == "" {
-		if base = git.DefaultBase(root); base == "" {
+		if base = serverDeps.Git.DefaultBase(root); base == "" {
 			out.Note = "Could not detect a base branch (origin/main, main, master). Pass `base` (a branch, tag, or SHA) explicitly."
 			return out, nil
 		}
 	}
 	out.Base = base
-	if err := git.ValidateRef(root, base); err != nil {
+	if err := serverDeps.Git.ValidateRef(root, base); err != nil {
 		out.Note = err.Error()
 		return out, nil
 	}
 
-	diffs, err := git.Diff(ctx, root, base)
+	diffs, err := serverDeps.Git.Diff(ctx, root, base)
 	if err != nil {
 		return out, err
 	}
@@ -199,7 +199,7 @@ func diffBaseGraph(ctx context.Context, root, base string, precise bool) (*provi
 		return nil, err
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
-	if err := git.ArchiveTree(ctx, root, base, tmp); err != nil {
+	if err := serverDeps.Git.ArchiveTree(ctx, root, base, tmp); err != nil {
 		return nil, err
 	}
 	return serverDeps.Graph.Index(ctx, tmp, true, precise)
@@ -271,8 +271,5 @@ func registerExplainDiffTool(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "explain_diff",
 		Description: "Explain a branch/PR: the files it changed, the symbols inside the changed lines, and each one's blast radius (transitive callers + at-risk tests). Scopes onboarding to a change set so it can run on every PR, not just once. Defaults the base to the merge-base with the default branch; pass `base` to override. Blast radius is syntactic (pass precise:true for type-checked Go).",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in explainDiffInput) (*mcp.CallToolResult, explainDiffOutput, error) {
-		out, err := explainDiff(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler("explain_diff", explainDiff))
 }
