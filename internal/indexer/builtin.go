@@ -193,7 +193,12 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*providers.Graph
 	g := assembleGraph(perFile)
 	g.Reused, g.Retagged = reused, retagged
 	if len(skippedLarge) > 0 {
-		g.Note = fmt.Sprintf("Skipped %d file(s) larger than %d MiB during indexing: %s", len(skippedLarge), maxIndexedFileBytes>>20, strings.Join(skippedLarge, ", "))
+		g.Note = fmt.Sprintf(
+			"Skipped %d file(s) larger than %d MiB during indexing: %s",
+			len(skippedLarge),
+			maxIndexedFileBytes>>20,
+			strings.Join(skippedLarge, ", "),
+		)
 	}
 	if cachePath != "" {
 		providers.SaveDiskIndex(cachePath, fresh)
@@ -208,34 +213,46 @@ func assembleGraph(perFile map[string]providers.FileData) *providers.Graph {
 		Forward:  map[string][]string{},
 		Reverse:  map[string][]string{},
 	}
-	defsByName := map[string][]string{}
-	defsByFileName := map[string][]string{}
-	defsByDirName := map[string][]string{}
-	defsByRecvName := map[string][]string{}
-	defsByFileRecvName := map[string][]string{}
-	defsByDirRecvName := map[string][]string{}
+	index := providers.RefLookupIndex{
+		ByFileName:     map[string][]string{},
+		ByDirName:      map[string][]string{},
+		ByName:         map[string][]string{},
+		ByFileRecvName: map[string][]string{},
+		ByDirRecvName:  map[string][]string{},
+		ByRecvName:     map[string][]string{},
+		FileImports:    map[string]map[string]providers.ResolvedImport{},
+	}
 	langSet := map[string]bool{}
 	var refs []providers.RawRef
-	fileImports := make(map[string]map[string]providers.ResolvedImport)
 
 	for file, fd := range perFile {
 		langSet[fd.Lang] = true
 		g.Files++
 		if len(fd.Imports) > 0 {
-			fileImports[file] = fd.Imports
+			index.FileImports[file] = fd.Imports
 		}
 		for _, sym := range fd.Defs {
 			if sym == nil {
 				continue
 			}
 			g.Defs[sym.QName] = sym
-			defsByName[sym.Name] = append(defsByName[sym.Name], sym.QName)
-			defsByFileName[sym.File+"\x00"+sym.Name] = append(defsByFileName[sym.File+"\x00"+sym.Name], sym.QName)
-			defsByDirName[providers.DirOf(sym.File)+"\x00"+sym.Name] = append(defsByDirName[providers.DirOf(sym.File)+"\x00"+sym.Name], sym.QName)
+			index.ByName[sym.Name] = append(index.ByName[sym.Name], sym.QName)
+
+			fileNameKey := graphNameKey(sym.File, sym.Name)
+			index.ByFileName[fileNameKey] = append(index.ByFileName[fileNameKey], sym.QName)
+
+			dirNameKey := graphNameKey(providers.DirOf(sym.File), sym.Name)
+			index.ByDirName[dirNameKey] = append(index.ByDirName[dirNameKey], sym.QName)
+
 			if sym.Recv != "" {
-				defsByRecvName[sym.Recv+"\x00"+sym.Name] = append(defsByRecvName[sym.Recv+"\x00"+sym.Name], sym.QName)
-				defsByFileRecvName[sym.File+"\x00"+sym.Recv+"\x00"+sym.Name] = append(defsByFileRecvName[sym.File+"\x00"+sym.Recv+"\x00"+sym.Name], sym.QName)
-				defsByDirRecvName[providers.DirOf(sym.File)+"\x00"+sym.Recv+"\x00"+sym.Name] = append(defsByDirRecvName[providers.DirOf(sym.File)+"\x00"+sym.Recv+"\x00"+sym.Name], sym.QName)
+				recvNameKey := graphNameKey(sym.Recv, sym.Name)
+				index.ByRecvName[recvNameKey] = append(index.ByRecvName[recvNameKey], sym.QName)
+
+				fileRecvNameKey := graphRecvKey(sym.File, sym.Recv, sym.Name)
+				index.ByFileRecvName[fileRecvNameKey] = append(index.ByFileRecvName[fileRecvNameKey], sym.QName)
+
+				dirRecvNameKey := graphRecvKey(providers.DirOf(sym.File), sym.Recv, sym.Name)
+				index.ByDirRecvName[dirRecvNameKey] = append(index.ByDirRecvName[dirRecvNameKey], sym.QName)
 			}
 		}
 		refs = append(refs, fd.Refs...)
@@ -243,7 +260,7 @@ func assembleGraph(perFile map[string]providers.FileData) *providers.Graph {
 
 	edges := providers.NewGraphEdgeSet()
 	for _, r := range refs {
-		callee := r.Lookup(defsByFileName, defsByDirName, defsByName, defsByFileRecvName, defsByDirRecvName, defsByRecvName, fileImports)
+		callee := r.Lookup(index)
 		if callee == "" || callee == r.CallerQName {
 			if callee == "" {
 				g.Unresolved++
@@ -260,4 +277,12 @@ func assembleGraph(perFile map[string]providers.FileData) *providers.Graph {
 		g.Note = "Call edges are syntactic (name + lexical scope), not type-checked; treat as likely, not proven."
 	}
 	return g
+}
+
+func graphNameKey(scope, name string) string {
+	return scope + "\x00" + name
+}
+
+func graphRecvKey(scope, recv, name string) string {
+	return scope + "\x00" + recv + "\x00" + name
 }

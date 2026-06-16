@@ -16,40 +16,51 @@ type RawRef struct {
 	AllowBare   bool
 }
 
+// RefLookupIndex groups definition and import indexes used to resolve raw references.
+type RefLookupIndex struct {
+	ByFileName     map[string][]string
+	ByDirName      map[string][]string
+	ByName         map[string][]string
+	ByFileRecvName map[string][]string
+	ByDirRecvName  map[string][]string
+	ByRecvName     map[string][]string
+	FileImports    map[string]map[string]ResolvedImport
+}
+
 // Lookup resolves a raw reference to a callee QName using lexical scoping heuristics.
-func (r RawRef) Lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvName, byRecvName map[string][]string, fileImports map[string]map[string]ResolvedImport) string {
+func (r RawRef) Lookup(index RefLookupIndex) string {
 	if IsHCLFile(r.CallerFile) {
-		return r.LookupHCL(byFileName, byDirName, fileImports)
+		return r.LookupHCL(index.ByFileName, index.ByDirName, index.FileImports)
 	}
 
 	if strings.HasSuffix(r.CallerFile, ".html") {
 		assoc := strings.TrimSuffix(r.CallerFile, ".html") + ".ts"
-		if cands := byFileName[assoc+"\x00"+r.CalleeName]; len(cands) == 1 {
+		if cands := index.ByFileName[nameKey(assoc, r.CalleeName)]; len(cands) == 1 {
 			return cands[0]
 		}
 	}
 
-	if imports, ok := fileImports[r.CallerFile]; ok {
+	if imports, ok := index.FileImports[r.CallerFile]; ok {
 		if imp, ok := imports[r.CalleeName]; ok {
 			switch imp.TargetName {
 			case "default":
-				if cands := byFileName[imp.TargetFile+"\x00default"]; len(cands) == 1 {
+				if cands := index.ByFileName[nameKey(imp.TargetFile, "default")]; len(cands) == 1 {
 					return cands[0]
 				}
-				if cands := byFileName[imp.TargetFile+"\x00"+r.CalleeName]; len(cands) == 1 {
+				if cands := index.ByFileName[nameKey(imp.TargetFile, r.CalleeName)]; len(cands) == 1 {
 					return cands[0]
 				}
 				baseName := strings.TrimSuffix(filepath.Base(imp.TargetFile), filepath.Ext(imp.TargetFile))
-				if cands := byFileName[imp.TargetFile+"\x00"+baseName]; len(cands) == 1 {
+				if cands := index.ByFileName[nameKey(imp.TargetFile, baseName)]; len(cands) == 1 {
 					return cands[0]
 				}
-				if sole := soleDefinitionInFile(imp.TargetFile, byFileName); sole != "" {
+				if sole := soleDefinitionInFile(imp.TargetFile, index.ByFileName); sole != "" {
 					return sole
 				}
 			case "*":
 				return ""
 			default:
-				if cands := byFileName[imp.TargetFile+"\x00"+imp.TargetName]; len(cands) == 1 {
+				if cands := index.ByFileName[nameKey(imp.TargetFile, imp.TargetName)]; len(cands) == 1 {
 					return cands[0]
 				}
 			}
@@ -57,19 +68,19 @@ func (r RawRef) Lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvN
 	}
 
 	if r.CalleeRecv != "" {
-		if imports, ok := fileImports[r.CallerFile]; ok {
+		if imports, ok := index.FileImports[r.CallerFile]; ok {
 			if imp, ok := imports[r.CalleeRecv]; ok {
-				if cands := byFileName[imp.TargetFile+"\x00"+r.CalleeName]; len(cands) == 1 {
+				if cands := index.ByFileName[nameKey(imp.TargetFile, r.CalleeName)]; len(cands) == 1 {
 					return cands[0]
 				}
 			}
 		}
 
-		if q := lookupRecv(r.CallerFile, r.CalleeRecv, r.CalleeName, byFileRecvName, byDirRecvName, byRecvName); q != "" {
+		if q := lookupRecv(index, r.CallerFile, r.CalleeRecv, r.CalleeName); q != "" {
 			return q
 		}
 		if left, _, ok := strings.Cut(r.CalleeRecv, " as "); ok && left != "" {
-			if q := lookupRecv(r.CallerFile, left, r.CalleeName, byFileRecvName, byDirRecvName, byRecvName); q != "" {
+			if q := lookupRecv(index, r.CallerFile, left, r.CalleeName); q != "" {
 				return q
 			}
 		}
@@ -78,16 +89,20 @@ func (r RawRef) Lookup(byFileName, byDirName, byName, byFileRecvName, byDirRecvN
 	if !r.AllowBare {
 		return ""
 	}
-	if cands := byFileName[r.CallerFile+"\x00"+r.CalleeName]; len(cands) == 1 {
+	if cands := index.ByFileName[nameKey(r.CallerFile, r.CalleeName)]; len(cands) == 1 {
 		return cands[0]
 	}
-	if cands := byDirName[DirOf(r.CallerFile)+"\x00"+r.CalleeName]; len(cands) == 1 {
+	if cands := index.ByDirName[nameKey(DirOf(r.CallerFile), r.CalleeName)]; len(cands) == 1 {
 		return cands[0]
 	}
-	if cands := byName[r.CalleeName]; len(cands) == 1 {
+	if cands := index.ByName[r.CalleeName]; len(cands) == 1 {
 		return cands[0]
 	}
 	return ""
+}
+
+func nameKey(scope, name string) string {
+	return scope + "\x00" + name
 }
 
 func soleDefinitionInFile(file string, byFileName map[string][]string) string {
@@ -109,31 +124,35 @@ func soleDefinitionInFile(file string, byFileName map[string][]string) string {
 	return sole
 }
 
-func lookupRecv(file, recv, name string, byFileRecvName, byDirRecvName, byRecvName map[string][]string) string {
-	if cands := byFileRecvName[file+"\x00"+recv+"\x00"+name]; len(cands) == 1 {
+func lookupRecv(index RefLookupIndex, file, recv, name string) string {
+	if cands := index.ByFileRecvName[recvKey(file, recv, name)]; len(cands) == 1 {
 		return cands[0]
 	}
-	if cands := byDirRecvName[DirOf(file)+"\x00"+recv+"\x00"+name]; len(cands) == 1 {
+	if cands := index.ByDirRecvName[recvKey(DirOf(file), recv, name)]; len(cands) == 1 {
 		return cands[0]
 	}
-	if cands := byRecvName[recv+"\x00"+name]; len(cands) == 1 {
+	if cands := index.ByRecvName[nameKey(recv, name)]; len(cands) == 1 {
 		return cands[0]
 	}
 
 	if len(recv) > 0 && unicode.IsLower(rune(recv[0])) {
 		capitalized := string(unicode.ToUpper(rune(recv[0]))) + recv[1:]
-		if cands := byFileRecvName[file+"\x00"+capitalized+"\x00"+name]; len(cands) == 1 {
+		if cands := index.ByFileRecvName[recvKey(file, capitalized, name)]; len(cands) == 1 {
 			return cands[0]
 		}
-		if cands := byDirRecvName[DirOf(file)+"\x00"+capitalized+"\x00"+name]; len(cands) == 1 {
+		if cands := index.ByDirRecvName[recvKey(DirOf(file), capitalized, name)]; len(cands) == 1 {
 			return cands[0]
 		}
-		if cands := byRecvName[capitalized+"\x00"+name]; len(cands) == 1 {
+		if cands := index.ByRecvName[nameKey(capitalized, name)]; len(cands) == 1 {
 			return cands[0]
 		}
 	}
 
 	return ""
+}
+
+func recvKey(scope, recv, name string) string {
+	return scope + "\x00" + recv + "\x00" + name
 }
 
 // defSpan records a definition's byte span for caller attribution during tagging.
