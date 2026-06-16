@@ -245,7 +245,13 @@ func installSkills(skillsDir string) (int, int, error) {
 		}
 		base := filepath.Join(skillsDir, sk.Name)
 		for rel, content := range files {
+			if strings.Contains(rel, "..") || filepath.IsAbs(rel) {
+				continue
+			}
 			dst := filepath.Join(base, rel)
+			if relPath, err := filepath.Rel(base, dst); err != nil || strings.HasPrefix(relPath, "..") {
+				continue
+			}
 			if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 				return count, 0, err
 			}

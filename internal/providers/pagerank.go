@@ -75,19 +75,19 @@ func (g *Graph) PageRank(seeds []string) map[string]float64 {
 		rank[i] = 1.0 / float64(n)
 	}
 	next := make([]float64, n)
-	for it := 0; it < iterations; it++ {
+	for range iterations {
 		var dangling float64
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if len(out[i]) == 0 {
 				dangling += rank[i]
 			}
 		}
 		// Base mass: random-restart plus the dangling-node mass, both spread over the
 		// teleport vector so total rank is conserved at 1.
-		for i := 0; i < n; i++ {
+		for i := range n {
 			next[i] = (1-damping)*teleport[i] + damping*dangling*teleport[i]
 		}
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if len(out[i]) == 0 {
 				continue
 			}

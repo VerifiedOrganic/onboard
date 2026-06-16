@@ -140,6 +140,11 @@ type Provider interface {
 	Index(ctx context.Context, root string) (*Graph, error)
 }
 
+// Indexer indexes a repository, optionally using a persistent per-file cache at cachePath.
+type Indexer interface {
+	IndexWithCache(ctx context.Context, root, cachePath string) (*Graph, error)
+}
+
 // Callees returns the direct callees of qname.
 func (g *Graph) Callees(qname string) []string { return dedupeSort(g.Forward[qname]) }
 

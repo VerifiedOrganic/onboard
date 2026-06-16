@@ -643,6 +643,36 @@ func TestPreviewInstallDoesNotWrite(t *testing.T) {
 	}
 }
 
+func TestPreviewUninstallDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	a := Agent{
+		Name:       "test",
+		SkillsDir:  filepath.Join(dir, "skills"),
+		ConfigPath: filepath.Join(dir, "config.toml"),
+		Shape:      ShapeTOMLMcpServers,
+	}
+	if _, err := Install(a, "/bin/onboard"); err != nil {
+		t.Fatal(err)
+	}
+	before := readFile(t, a.ConfigPath)
+	res, err := PreviewUninstall(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ConfigAction != "removed" {
+		t.Fatalf("ConfigAction = %q, want removed", res.ConfigAction)
+	}
+	if res.SkillDirsRemoved == 0 {
+		t.Fatal("preview should report skill dirs to remove")
+	}
+	if readFile(t, a.ConfigPath) != before {
+		t.Fatal("preview modified config file")
+	}
+	if !exists(filepath.Join(a.SkillsDir, "onboard-codebase-walkthrough")) {
+		t.Fatal("preview removed skill dir early")
+	}
+}
+
 func TestUninstallRemovesOnboardConfigAndSkills(t *testing.T) {
 	dir := t.TempDir()
 	a := Agent{
