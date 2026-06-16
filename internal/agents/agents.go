@@ -7,13 +7,13 @@
 // docs and live config files), so each agent declares a Shape that fully
 // determines how its server entry is written:
 //
-//   - ShapeJSONMcpServers: JSON, top-level "mcpServers" object, entry is
+//   - ShapeJSONMCPServers: JSON, top-level "mcpServers" object, entry is
 //     {command, args}. Used by Claude Code, Cursor, and the npm grok-cli.
-//   - ShapeJSONMcpServersWithTools: same as ShapeJSONMcpServers, plus type:"local"
+//   - ShapeJSONMCPServersWithTools: same as ShapeJSONMCPServers, plus type:"local"
 //     and tools:["*"]. Used by GitHub Copilot CLI.
 //   - ShapeJSONOpencode: JSON, top-level "mcp" object (the outlier), entry is
 //     {type:"local", command:[bin, args...], enabled, environment}.
-//   - ShapeTOMLMcpServers: TOML, [mcp_servers.<name>] table with command/args.
+//   - ShapeTOMLMCPServers: TOML, [mcp_servers.<name>] table with command/args.
 //     Used by Codex and the xAI Grok Build CLI.
 package agents
 
@@ -30,14 +30,16 @@ import (
 type Shape int
 
 const (
-	// ShapeJSONMcpServers stores MCP servers under a top-level mcpServers object.
-	ShapeJSONMcpServers Shape = iota
-	// ShapeJSONMcpServersWithTools stores MCP servers under mcpServers with a tools allowlist.
-	ShapeJSONMcpServersWithTools
+	// ShapeUnknown is the zero value and is treated as unsupported.
+	ShapeUnknown Shape = iota
+	// ShapeJSONMCPServers stores MCP servers under a top-level mcpServers object.
+	ShapeJSONMCPServers
+	// ShapeJSONMCPServersWithTools stores MCP servers under mcpServers with a tools allowlist.
+	ShapeJSONMCPServersWithTools
 	// ShapeJSONOpencode stores opencode local servers under a top-level mcp object.
 	ShapeJSONOpencode
-	// ShapeTOMLMcpServers stores MCP servers as mcp_servers TOML tables.
-	ShapeTOMLMcpServers
+	// ShapeTOMLMCPServers stores MCP servers as mcp_servers TOML tables.
+	ShapeTOMLMCPServers
 )
 
 // Agent describes how to install onboard into a particular coding agent.
@@ -84,10 +86,10 @@ func Registry() ([]Agent, error) {
 	// ~/.grok/config.toml) and the npm grok-cli (JSON at
 	// ~/.grok/user-settings.json). Prefer TOML; fall back to JSON only if the
 	// JSON variant is present and the TOML one is not.
-	grok := Agent{Name: "grok", SkillsDir: j(".grok", "skills"), ConfigPath: j(".grok", "config.toml"), Shape: ShapeTOMLMcpServers}
+	grok := Agent{Name: "grok", SkillsDir: j(".grok", "skills"), ConfigPath: j(".grok", "config.toml"), Shape: ShapeTOMLMCPServers}
 	if exists(j(".grok", "user-settings.json")) && !exists(j(".grok", "config.toml")) {
 		grok.ConfigPath = j(".grok", "user-settings.json")
-		grok.Shape = ShapeJSONMcpServers
+		grok.Shape = ShapeJSONMCPServers
 	}
 
 	kimiHome := j(".kimi-code")
@@ -102,14 +104,14 @@ func Registry() ([]Agent, error) {
 	}
 
 	return []Agent{
-		{Name: "claude", SkillsDir: j(".claude", "skills"), ConfigPath: j(".claude.json"), Shape: ShapeJSONMcpServers},
-		{Name: "codex", SkillsDir: filepath.Join(codexHome, "skills"), ConfigPath: filepath.Join(codexHome, "config.toml"), Shape: ShapeTOMLMcpServers},
+		{Name: "claude", SkillsDir: j(".claude", "skills"), ConfigPath: j(".claude.json"), Shape: ShapeJSONMCPServers},
+		{Name: "codex", SkillsDir: filepath.Join(codexHome, "skills"), ConfigPath: filepath.Join(codexHome, "config.toml"), Shape: ShapeTOMLMCPServers},
 		grok,
-		{Name: "kimi", SkillsDir: filepath.Join(kimiHome, "skills"), ConfigPath: filepath.Join(kimiHome, "mcp.json"), Shape: ShapeJSONMcpServers},
+		{Name: "kimi", SkillsDir: filepath.Join(kimiHome, "skills"), ConfigPath: filepath.Join(kimiHome, "mcp.json"), Shape: ShapeJSONMCPServers},
 		{Name: "opencode", SkillsDir: j(".config", "opencode", "skills"), ConfigPath: j(".config", "opencode", "opencode.json"), Shape: ShapeJSONOpencode},
-		{Name: "cursor", SkillsDir: j(".cursor", "skills"), ConfigPath: j(".cursor", "mcp.json"), Shape: ShapeJSONMcpServers},
-		{Name: "copilot", SkillsDir: filepath.Join(copilotHome, "skills"), ConfigPath: filepath.Join(copilotHome, "mcp-config.json"), Shape: ShapeJSONMcpServersWithTools},
-		{Name: "junie", SkillsDir: j(".junie", "skills"), ConfigPath: j(".junie", "mcp", "mcp.json"), Shape: ShapeJSONMcpServers},
+		{Name: "cursor", SkillsDir: j(".cursor", "skills"), ConfigPath: j(".cursor", "mcp.json"), Shape: ShapeJSONMCPServers},
+		{Name: "copilot", SkillsDir: filepath.Join(copilotHome, "skills"), ConfigPath: filepath.Join(copilotHome, "mcp-config.json"), Shape: ShapeJSONMCPServersWithTools},
+		{Name: "junie", SkillsDir: j(".junie", "skills"), ConfigPath: j(".junie", "mcp", "mcp.json"), Shape: ShapeJSONMCPServers},
 	}, nil
 }
 

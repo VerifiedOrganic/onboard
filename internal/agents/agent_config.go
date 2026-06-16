@@ -22,13 +22,13 @@ type configResult struct {
 
 func registerMCP(a Agent, binPath string) (configResult, error) {
 	switch a.Shape {
-	case ShapeJSONMcpServers:
+	case ShapeJSONMCPServers:
 		return registerJSONMcpServersDetailed(a.ConfigPath, binPath)
-	case ShapeJSONMcpServersWithTools:
+	case ShapeJSONMCPServersWithTools:
 		return registerJSONMcpServersWithToolsDetailed(a.ConfigPath, binPath)
 	case ShapeJSONOpencode:
 		return registerJSONOpencodeDetailed(a.ConfigPath, binPath)
-	case ShapeTOMLMcpServers:
+	case ShapeTOMLMCPServers:
 		action, err := registerTOML(a.ConfigPath, binPath)
 		return configResult{Action: action}, err
 	}
@@ -57,13 +57,13 @@ func loadJSONObjectDetailed(path string) (map[string]any, string, error) {
 			return nil, "", bakErr
 		}
 		if err := os.Rename(path, bak); err != nil {
-			return nil, "", fmt.Errorf("back up unparseable JSON config %s: %w", path, err)
+			return nil, "", fmt.Errorf("back up unparseable json config %s: %w", path, err)
 		}
 		return map[string]any{}, bak, nil
 	}
 	root, ok := parsed.(map[string]any)
 	if !ok || root == nil {
-		return nil, "", fmt.Errorf("%s must contain a JSON object", path)
+		return nil, "", fmt.Errorf("%s must contain a json object", path)
 	}
 	return root, "", nil
 }
@@ -111,7 +111,7 @@ func objectField(root map[string]any, key string) (map[string]any, error) {
 	}
 	m, ok := v.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("%q must be a JSON object", key)
+		return nil, fmt.Errorf("%q must be a json object", key)
 	}
 	return m, nil
 }
@@ -151,7 +151,7 @@ func registerJSONMcpServersEntry(path, binPath string, includeTools bool) (confi
 	if existing, ok := servers["onboard"]; ok {
 		entry, ok := existing.(map[string]any)
 		if !ok {
-			return configResult{}, fmt.Errorf("mcpServers.onboard must be a JSON object")
+			return configResult{}, fmt.Errorf("mcpServers.onboard must be a json object")
 		}
 		changed := refreshStringField(entry, "command", binPath)
 		changed = refreshStringListField(entry, "args", []string{"serve"}) || changed
@@ -203,7 +203,7 @@ func registerJSONOpencodeDetailed(path, binPath string) (configResult, error) {
 	if existing, ok := servers["onboard"]; ok {
 		entry, ok := existing.(map[string]any)
 		if !ok {
-			return configResult{}, fmt.Errorf("mcp.onboard must be a JSON object")
+			return configResult{}, fmt.Errorf("mcp.onboard must be a json object")
 		}
 		changed := refreshStringField(entry, "type", "local")
 		changed = refreshStringListField(entry, "command", []string{binPath, "serve"}) || changed
@@ -271,13 +271,13 @@ func registerTOML(path, binPath string) (string, error) {
 
 func planRegisterMCP(a Agent, binPath string) (configResult, error) {
 	switch a.Shape {
-	case ShapeJSONMcpServers:
+	case ShapeJSONMCPServers:
 		return planJSONMcpServersEntry(a.ConfigPath, binPath, false)
-	case ShapeJSONMcpServersWithTools:
+	case ShapeJSONMCPServersWithTools:
 		return planJSONMcpServersEntry(a.ConfigPath, binPath, true)
 	case ShapeJSONOpencode:
 		return planJSONOpencode(a.ConfigPath, binPath)
-	case ShapeTOMLMcpServers:
+	case ShapeTOMLMCPServers:
 		action, err := planTOML(a.ConfigPath, binPath)
 		return configResult{Action: action}, err
 	}
@@ -299,7 +299,7 @@ func planJSONMcpServersEntry(path, binPath string, includeTools bool) (configRes
 	if existing, ok := servers["onboard"]; ok {
 		entry, ok := existing.(map[string]any)
 		if !ok {
-			return configResult{}, fmt.Errorf("mcpServers.onboard must be a JSON object")
+			return configResult{}, fmt.Errorf("mcpServers.onboard must be a json object")
 		}
 		changed := refreshStringField(entry, "command", binPath)
 		changed = refreshStringListField(entry, "args", []string{"serve"}) || changed
@@ -330,7 +330,7 @@ func planJSONOpencode(path, binPath string) (configResult, error) {
 	if existing, ok := servers["onboard"]; ok {
 		entry, ok := existing.(map[string]any)
 		if !ok {
-			return configResult{}, fmt.Errorf("mcp.onboard must be a JSON object")
+			return configResult{}, fmt.Errorf("mcp.onboard must be a json object")
 		}
 		changed := refreshStringField(entry, "type", "local")
 		changed = refreshStringListField(entry, "command", []string{binPath, "serve"}) || changed
@@ -370,7 +370,7 @@ func loadJSONObjectForPlan(path string) (map[string]any, string, bool, error) {
 	}
 	root, ok := parsed.(map[string]any)
 	if !ok || root == nil {
-		return nil, "", false, fmt.Errorf("%s must contain a JSON object", path)
+		return nil, "", false, fmt.Errorf("%s must contain a json object", path)
 	}
 	return root, "", false, nil
 }
@@ -396,13 +396,13 @@ func planTOML(path, binPath string) (string, error) {
 
 func unregisterMCP(a Agent) (configResult, error) {
 	switch a.Shape {
-	case ShapeJSONMcpServers, ShapeJSONMcpServersWithTools:
+	case ShapeJSONMCPServers, ShapeJSONMCPServersWithTools:
 		action, err := unregisterJSONServer(a.ConfigPath, "mcpServers")
 		return configResult{Action: action}, err
 	case ShapeJSONOpencode:
 		action, err := unregisterJSONServer(a.ConfigPath, "mcp")
 		return configResult{Action: action}, err
-	case ShapeTOMLMcpServers:
+	case ShapeTOMLMCPServers:
 		action, err := unregisterTOML(a.ConfigPath)
 		return configResult{Action: action}, err
 	}
@@ -411,13 +411,13 @@ func unregisterMCP(a Agent) (configResult, error) {
 
 func planUnregisterMCP(a Agent) (configResult, error) {
 	switch a.Shape {
-	case ShapeJSONMcpServers, ShapeJSONMcpServersWithTools:
+	case ShapeJSONMCPServers, ShapeJSONMCPServersWithTools:
 		action, err := planUnregisterJSONServer(a.ConfigPath, "mcpServers")
 		return configResult{Action: action}, err
 	case ShapeJSONOpencode:
 		action, err := planUnregisterJSONServer(a.ConfigPath, "mcp")
 		return configResult{Action: action}, err
-	case ShapeTOMLMcpServers:
+	case ShapeTOMLMCPServers:
 		action, err := planUnregisterTOML(a.ConfigPath)
 		return configResult{Action: action}, err
 	}
@@ -484,11 +484,11 @@ func readJSONObjectStrict(path string) (map[string]any, bool, error) {
 	}
 	var parsed any
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return nil, true, fmt.Errorf("parse JSON config %s: %w", path, err)
+		return nil, true, fmt.Errorf("parse json config %s: %w", path, err)
 	}
 	root, ok := parsed.(map[string]any)
 	if !ok || root == nil {
-		return nil, true, fmt.Errorf("%s must contain a JSON object", path)
+		return nil, true, fmt.Errorf("%s must contain a json object", path)
 	}
 	return root, true, nil
 }
@@ -500,7 +500,7 @@ func jsonServerObject(root map[string]any, key string) (map[string]any, bool, er
 	}
 	servers, ok := v.(map[string]any)
 	if !ok {
-		return nil, true, fmt.Errorf("%q must be a JSON object", key)
+		return nil, true, fmt.Errorf("%q must be a json object", key)
 	}
 	return servers, true, nil
 }

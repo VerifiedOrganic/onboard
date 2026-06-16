@@ -5,19 +5,19 @@ import "errors"
 
 var (
 	// ErrNotGitRepository indicates git is unavailable or root is outside a work tree.
-	ErrNotGitRepository = errors.New("not a git repository")
+	ErrNotGitRepository = errors.New("onboard: not a git repository")
 
 	// ErrInvalidGitRef indicates a git ref failed validation or does not resolve.
-	ErrInvalidGitRef = errors.New("invalid git ref")
+	ErrInvalidGitRef = errors.New("onboard: invalid git ref")
 
 	// ErrPathEscapesRoot indicates a relative path leaves the repository root.
-	ErrPathEscapesRoot = errors.New("path escapes repository root")
+	ErrPathEscapesRoot = errors.New("onboard: path escapes repository root")
 
 	// ErrRootNotAllowed indicates the requested root is outside configured allowlist.
-	ErrRootNotAllowed = errors.New("root not in allowed set")
+	ErrRootNotAllowed = errors.New("onboard: root not in allowed set")
 
 	// ErrRootNotDirectory indicates the resolved path exists but is not a directory.
-	ErrRootNotDirectory = errors.New("root is not a directory")
+	ErrRootNotDirectory = errors.New("onboard: root is not a directory")
 )
 
 // Is reports whether err matches target.

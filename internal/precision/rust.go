@@ -518,7 +518,7 @@ func (c *rustAnalyzerClient) read() (lspMessage, error) {
 		}
 	}
 	if length < 0 {
-		return lspMessage{}, errors.New("missing LSP Content-Length")
+		return lspMessage{}, errors.New("missing lsp content-length")
 	}
 	body := make([]byte, length)
 	if _, err := io.ReadFull(c.stdout, body); err != nil {

@@ -37,7 +37,7 @@ and network controls. Set --http-token or ONBOARD_HTTP_TOKEN to require a bearer
 		if serveHTTP != "" {
 			wd, err := os.Getwd()
 			if err != nil {
-				return fmt.Errorf("resolve working directory for HTTP root policy: %w", err)
+				return fmt.Errorf("resolve working directory for http root policy: %w", err)
 			}
 			opts = append(opts, server.WithRootPolicy(transport.RootPolicyFromEnv(wd)))
 			opts = append(opts, server.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil))))

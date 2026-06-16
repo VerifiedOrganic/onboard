@@ -441,22 +441,22 @@ func TestRegistryShapes(t *testing.T) {
 		}
 		byName[a.Name] = a
 	}
-	if byName["codex"].Shape != ShapeTOMLMcpServers {
+	if byName["codex"].Shape != ShapeTOMLMCPServers {
 		t.Error("codex should be TOML mcp_servers")
 	}
-	if byName["kimi"].Shape != ShapeJSONMcpServers {
+	if byName["kimi"].Shape != ShapeJSONMCPServers {
 		t.Error("kimi should be JSON mcpServers")
 	}
 	if byName["opencode"].Shape != ShapeJSONOpencode {
 		t.Error("opencode should be the JSON opencode outlier shape")
 	}
-	if byName["claude"].Shape != ShapeJSONMcpServers {
+	if byName["claude"].Shape != ShapeJSONMCPServers {
 		t.Error("claude should be JSON mcpServers")
 	}
-	if byName["copilot"].Shape != ShapeJSONMcpServersWithTools {
+	if byName["copilot"].Shape != ShapeJSONMCPServersWithTools {
 		t.Error("copilot should be JSON mcpServers with tools")
 	}
-	if byName["junie"].Shape != ShapeJSONMcpServers {
+	if byName["junie"].Shape != ShapeJSONMCPServers {
 		t.Error("junie should be JSON mcpServers")
 	}
 	if !strings.HasSuffix(byName["copilot"].ConfigPath, filepath.Join(".copilot", "mcp-config.json")) {
@@ -593,7 +593,7 @@ func TestInstallRefreshesStaleBinarySoInspectIsHealthy(t *testing.T) {
 		Name:       "test",
 		SkillsDir:  filepath.Join(dir, "skills"),
 		ConfigPath: filepath.Join(dir, "config.toml"),
-		Shape:      ShapeTOMLMcpServers,
+		Shape:      ShapeTOMLMCPServers,
 	}
 	if _, err := Install(a, oldBin); err != nil {
 		t.Fatal(err)
@@ -623,7 +623,7 @@ func TestPreviewInstallDoesNotWrite(t *testing.T) {
 		Name:       "test",
 		SkillsDir:  filepath.Join(dir, "skills"),
 		ConfigPath: filepath.Join(dir, "config.toml"),
-		Shape:      ShapeTOMLMcpServers,
+		Shape:      ShapeTOMLMCPServers,
 	}
 	res, err := PreviewInstall(a, "/bin/onboard")
 	if err != nil {
@@ -649,7 +649,7 @@ func TestPreviewUninstallDoesNotWrite(t *testing.T) {
 		Name:       "test",
 		SkillsDir:  filepath.Join(dir, "skills"),
 		ConfigPath: filepath.Join(dir, "config.toml"),
-		Shape:      ShapeTOMLMcpServers,
+		Shape:      ShapeTOMLMCPServers,
 	}
 	if _, err := Install(a, "/bin/onboard"); err != nil {
 		t.Fatal(err)
@@ -679,7 +679,7 @@ func TestUninstallRemovesOnboardConfigAndSkills(t *testing.T) {
 		Name:       "test",
 		SkillsDir:  filepath.Join(dir, "skills"),
 		ConfigPath: filepath.Join(dir, "config.toml"),
-		Shape:      ShapeTOMLMcpServers,
+		Shape:      ShapeTOMLMCPServers,
 	}
 	if _, err := Install(a, "/bin/onboard"); err != nil {
 		t.Fatal(err)
@@ -710,7 +710,7 @@ func TestUninstallJSONPreservesSiblingServers(t *testing.T) {
 			"onboard": map[string]any{"command": "/bin/onboard", "args": []string{"serve"}},
 		},
 	})
-	a := Agent{Name: "test", ConfigPath: path, Shape: ShapeJSONMcpServers}
+	a := Agent{Name: "test", ConfigPath: path, Shape: ShapeJSONMCPServers}
 	res, err := Uninstall(a)
 	if err != nil {
 		t.Fatal(err)

@@ -18,7 +18,7 @@ func TestInspectHealthyAfterInstall(t *testing.T) {
 		Name:       "claude",
 		SkillsDir:  filepath.Join(home, ".claude", "skills"),
 		ConfigPath: filepath.Join(home, ".claude.json"),
-		Shape:      ShapeJSONMcpServers,
+		Shape:      ShapeJSONMCPServers,
 	}
 	if _, err := Install(a, bin); err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestInspectFlagsMissingRegistration(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a := Agent{Name: "claude", SkillsDir: filepath.Join(home, ".claude", "skills"), ConfigPath: cfg, Shape: ShapeJSONMcpServers}
+	a := Agent{Name: "claude", SkillsDir: filepath.Join(home, ".claude", "skills"), ConfigPath: cfg, Shape: ShapeJSONMCPServers}
 
 	h := Inspect(a)
 	if h.Registered {
@@ -65,7 +65,7 @@ func TestInspectFlagsMissingBinaryTOML(t *testing.T) {
 		Name:       "codex",
 		SkillsDir:  filepath.Join(home, ".codex", "skills"),
 		ConfigPath: filepath.Join(home, ".codex", "config.toml"),
-		Shape:      ShapeTOMLMcpServers,
+		Shape:      ShapeTOMLMCPServers,
 	}
 	bin := filepath.Join(home, "ghost")
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {

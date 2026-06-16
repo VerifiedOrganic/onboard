@@ -34,7 +34,7 @@ type Metrics struct {
 // ServeHTTP runs the MCP server on Streamable HTTP until ctx is cancelled.
 func ServeHTTP(ctx context.Context, mcpServer *mcp.Server, cfg Config) error {
 	if cfg.Token == "" {
-		return fmt.Errorf("HTTP mode requires a bearer token")
+		return fmt.Errorf("http mode requires a bearer token")
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
