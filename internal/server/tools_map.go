@@ -1,15 +1,17 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/VerifiedOrganic/onboard/internal/pathutil"
 	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
@@ -57,6 +59,10 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 	if out.Format != "mermaid" {
 		out.Format = "html"
 	}
+	root, err := resolveRoot(ctx, in.Root)
+	if err != nil {
+		return out, err
+	}
 	topic := in.Topic
 	if topic == "" {
 		topic = "Codebase map"
@@ -64,10 +70,6 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 
 	nodes, edges := in.Nodes, in.Edges
 	if len(nodes) == 0 {
-		root, err := resolveRoot(in.Root)
-		if err != nil {
-			return out, err
-		}
 		g, err := indexGraph(ctx, root, in.Refresh, false) // package-level import map: syntactic is sufficient
 		if err != nil {
 			return out, err
@@ -135,18 +137,27 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 	}
 
 	if in.OutputPath != "" {
-		// OutputPath is caller-controlled by design: render_map is a file-writing
-		// tool and the MCP caller (the agent) is trusted, like Write. The content
-		// is always returned inline too, so writing is opt-in.
-		if err := os.MkdirAll(filepath.Dir(in.OutputPath), 0o700); err != nil {
+		outputPath, err := resolveOutputPath(root, in.OutputPath)
+		if err != nil {
 			return out, err
 		}
-		if err := os.WriteFile(in.OutputPath, []byte(out.Content), 0o644); err != nil {
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
 			return out, err
 		}
-		out.Path = in.OutputPath
+		if err := os.WriteFile(outputPath, []byte(out.Content), 0o644); err != nil {
+			return out, err
+		}
+		out.Path = outputPath
 	}
 	return out, nil
+}
+
+func resolveOutputPath(root, outputPath string) (string, error) {
+	path, err := pathutil.JoinUnderRoot(root, outputPath)
+	if err != nil {
+		return "", fmt.Errorf("output_path %q must stay within repo root %q: %w", outputPath, root, err)
+	}
+	return path, nil
 }
 
 // deriveMap aggregates the file-level call graph to a directory-level dependency
@@ -169,6 +180,9 @@ func deriveMap(g *providers.Graph, maxNodes int) (nodes []mapNode, edges []mapEd
 
 	filesByDir := map[string]map[string]bool{}
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		d := filepath.ToSlash(filepath.Dir(s.File))
 		if d == "." || d == "" {
 			d = "(root)"
@@ -205,11 +219,11 @@ func deriveMap(g *providers.Graph, maxNodes int) (nodes []mapNode, edges []mapEd
 	for d := range filesByDir {
 		all = append(all, ranked{d, deg[d]})
 	}
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].deg != all[j].deg {
-			return all[i].deg > all[j].deg
+	slices.SortFunc(all, func(a, b ranked) int {
+		if c := cmp.Compare(b.deg, a.deg); c != 0 {
+			return c
 		}
-		return all[i].dir < all[j].dir
+		return cmp.Compare(a.dir, b.dir)
 	})
 	total = len(all)
 	if len(all) > maxNodes {
@@ -224,7 +238,7 @@ func deriveMap(g *providers.Graph, maxNodes int) (nodes []mapNode, edges []mapEd
 		for f := range filesByDir[r.dir] {
 			files = append(files, f)
 		}
-		sort.Strings(files)
+		slices.Sort(files)
 		nodes = append(nodes, mapNode{
 			ID:          r.dir,
 			Label:       r.dir,
@@ -253,12 +267,9 @@ func deriveMap(g *providers.Graph, maxNodes int) (nodes []mapNode, edges []mapEd
 // Mermaid/HTML rendering (renderMermaid, renderMapHTML, the sanitizers, and the HTML
 // template) lives in map_render.go.
 
-func registerMapTool(s *mcp.Server) {
+func registerMapTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "render_map",
 		Description: "Render a navigable map of the codebase. With explicit nodes/edges it renders exactly those; otherwise it derives a package-level dependency map from the code graph. Format 'html' produces a self-contained interactive file (Mermaid + pan/zoom + click-to-detail); 'mermaid' produces diagram-as-code suitable for committing.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in renderMapInput) (*mcp.CallToolResult, renderMapOutput, error) {
-		out, err := renderMap(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler(rt, "render_map", renderMap))
 }

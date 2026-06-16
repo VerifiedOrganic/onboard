@@ -34,7 +34,7 @@ Call `onboard:guide_read`. It reports whether a guide `exists`, its `cached_sha`
 - **`current: false`** → the guide is stale relative to HEAD. Keep the returned `body` in hand — it is the document you will patch, not replace — and continue to Step 2.
 
 ### Step 2 — Compute the delta
-Call `onboard:guide_delta`. It returns `cached_sha`, `head_sha`, `current`, and `changed: [{status, path}]` — the files that moved between the cached SHA and HEAD. Statuses are raw git name-status: `A` added, `M` modified, `D` deleted, `R...` renamed (e.g. `R096`, shown as `old new`).
+Call `onboard:guide_delta`. It returns `cached_sha`, `head_sha`, `current`, and `changed: [{status, path, old_path?}]` — the files that moved between the cached SHA and HEAD. Statuses are raw git name-status: `A` added, `M` modified, `D` deleted, `R...` renamed, `C...` copied. For renames/copies, `path` is the new path and `old_path` is the previous path.
 
 Read the change list before opening any file. It is your work order: it bounds both which files you read and which guide sections can possibly need editing. If `guide_delta` comes back `current: true` or reports no SHA-tagged guide, reconcile with Step 1 (normally Step 1 already caught these) and stop.
 

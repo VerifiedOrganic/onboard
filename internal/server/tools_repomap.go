@@ -1,16 +1,17 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/VerifiedOrganic/onboard/internal/git"
 )
 
 // repo_map ranks the codebase by call-graph centrality (PageRank) and returns a
@@ -67,7 +68,7 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 	if maxTokens <= 0 {
 		maxTokens = 1000
 	}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -93,7 +94,7 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 	}
 	churn := map[string]int{}
 	if weight > 0 {
-		churn = fileChurn(root)
+		churn = fileChurn(ctx, root, in.Refresh)
 	}
 	blended := weight > 0 && len(churn) > 0
 
@@ -111,6 +112,9 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 
 	ranked := make([]rankedSymbol, 0, len(g.Defs))
 	for q, sym := range g.Defs {
+		if sym == nil {
+			continue
+		}
 		commits := churn[filepath.ToSlash(sym.File)]
 		ranked = append(ranked, rankedSymbol{
 			QName:   q,
@@ -123,14 +127,14 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 			Score:   blendScore(pr[q], maxPR, commits, maxLogChurn, weight, blended),
 		})
 	}
-	sort.Slice(ranked, func(i, j int) bool {
-		if ranked[i].Score != ranked[j].Score {
-			return ranked[i].Score > ranked[j].Score
+	slices.SortFunc(ranked, func(a, b rankedSymbol) int {
+		if c := compareScoreDesc(a.Score, b.Score); c != 0 {
+			return c
 		}
-		if ranked[i].Callers != ranked[j].Callers {
-			return ranked[i].Callers > ranked[j].Callers
+		if c := cmp.Compare(b.Callers, a.Callers); c != 0 {
+			return c
 		}
-		return ranked[i].QName < ranked[j].QName
+		return cmp.Compare(a.QName, b.QName)
 	})
 
 	// Greedily include symbols in rank order until the token budget is exhausted,
@@ -184,7 +188,9 @@ func renderRepoMap(syms []rankedSymbol) string {
 	var b strings.Builder
 	for _, f := range order {
 		grp := groups[f]
-		sort.Slice(grp, func(i, j int) bool { return grp[i].Line < grp[j].Line })
+		slices.SortFunc(grp, func(a, b rankedSymbol) int {
+			return cmp.Compare(a.Line, b.Line)
+		})
 		b.WriteString(f)
 		b.WriteByte('\n')
 		for _, s := range grp {
@@ -213,6 +219,17 @@ func symbolLine(s rankedSymbol) string {
 	return fmt.Sprintf("  :%-5d %-8s %s%s\n", s.Line, kind, s.Name, suffix)
 }
 
+func compareScoreDesc(a, b float64) int {
+	switch {
+	case a > b:
+		return -1
+	case b > a:
+		return 1
+	default:
+		return 0
+	}
+}
+
 // blendScore fuses call-graph centrality with git churn into one ranking score in [0,1].
 // Each signal is normalized independently: centrality by the max PageRank score, churn by
 // the max log-commit-count (commit counts are heavy-tailed, so a linear scale would let one
@@ -237,22 +254,60 @@ func blendScore(pr, maxPR float64, commits int, maxLogChurn, weight float64, ble
 	return (1-weight)*centrality + weight*churn
 }
 
+const churnCacheTTL = 5 * time.Minute
+
+type churnCacheEntry struct {
+	expires time.Time
+	values  map[string]int
+}
+
+var churnCache = struct {
+	sync.Mutex
+	entries map[string]churnCacheEntry
+}{entries: map[string]churnCacheEntry{}}
+
 // fileChurn returns per-file commit counts keyed by slash-normalized repo-relative path,
 // or an empty map outside a git work tree (so callers degrade cleanly to no churn signal).
 // Shared by repo_map's ranking blend and context_pack's relevance scoring.
-func fileChurn(root string) map[string]int {
+func fileChurn(ctx context.Context, root string, refresh bool) map[string]int {
+	return fileChurnWithMax(ctx, root, churnScanCommits, refresh)
+}
+
+func fileChurnWithMax(ctx context.Context, root string, maxCommits int, refresh bool) map[string]int {
+	key := fmt.Sprintf("%s\x00%d", root, maxCommits)
+	now := time.Now()
+	if !refresh {
+		churnCache.Lock()
+		if ent, ok := churnCache.entries[key]; ok && now.Before(ent.expires) {
+			out := copyIntMap(ent.values)
+			churnCache.Unlock()
+			return out
+		}
+		churnCache.Unlock()
+	}
+
 	churn := map[string]int{}
-	if !git.Available(root) {
-		return churn
+	deps := depsForContext(ctx)
+	if deps.Git.Available(ctx, root) {
+		if hist, err := deps.Git.History(ctx, root, maxCommits); err == nil {
+			for _, fs := range hist {
+				churn[filepath.ToSlash(fs.Path)] = fs.Commits
+			}
+		}
 	}
-	hist, err := git.History(root, churnScanCommits)
-	if err != nil {
-		return churn
-	}
-	for _, fs := range hist {
-		churn[filepath.ToSlash(fs.Path)] = fs.Commits
-	}
+
+	churnCache.Lock()
+	churnCache.entries[key] = churnCacheEntry{expires: now.Add(churnCacheTTL), values: copyIntMap(churn)}
+	churnCache.Unlock()
 	return churn
+}
+
+func copyIntMap(in map[string]int) map[string]int {
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func clamp01(f float64) float64 {
@@ -275,12 +330,9 @@ func estTokens(s string) int {
 	return 1
 }
 
-func registerRepoMapTool(s *mcp.Server) {
+func registerRepoMapTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "repo_map",
 		Description: "Rank the codebase by call-graph centrality (PageRank), blended with git churn when available, and return a compact, token-budgeted map of the most important symbols — the heavily-relied-upon, actively-changing core. Load it first for orientation. Pass focus (symbols/files) to bias the ranking toward an area you care about, or churn_weight to tune how much commit frequency matters.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in repoMapInput) (*mcp.CallToolResult, repoMapOutput, error) {
-		out, err := repoMap(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler(rt, "repo_map", repoMap))
 }

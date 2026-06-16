@@ -73,14 +73,16 @@ Persists `body` with a freshly stamped header. `mode` defaults to `full`; only `
 `delta` are accepted (anything else is rejected before any I/O). The HEAD SHA and branch
 are read from git and silently left empty when git is unavailable — in which case the
 output `note` warns that the guide isn't SHA-tagged and delta updates won't work. The file
-is written `0o644`; its parent dir is created `0o700`.
+is written atomically via temp file + rename with mode `0o644`; its parent dir is created
+`0o700`.
 
 ### `guide_delta`
 Read-only. It compares the cached header SHA to HEAD by **string equality** and, when they
 differ, runs `git diff --name-status <cachedSHA>..HEAD` to list changed files
-(`[]{status, path}`; for renames it reports the new path). It returns early with a `note`
-when: not a git repo, no cached guide (or the guide has no SHA), or already current. It
-does **not** write anything — the caller follows up with `guide_write mode: "delta"`.
+(`[]{status, path, old_path?}`; for renames/copies `path` is the new path and `old_path`
+is the previous path). It returns early with a `note` when: not a git repo, no cached guide
+(or the guide has no SHA), or already current. It does **not** write anything — the caller
+follows up with `guide_write mode: "delta"`.
 
 ## The git layer
 
@@ -92,7 +94,7 @@ does **not** write anything — the caller follows up with `guide_write mode: "d
 | `CommonDir(root)` | `rev-parse --git-common-dir` | absolute common dir |
 | `HeadSHA(root)` | `rev-parse HEAD` | full 40-char SHA |
 | `Branch(root)` | `rev-parse --abbrev-ref HEAD` | branch name or `HEAD` (detached) |
-| `DiffNameStatus(root, fromSHA)` | `diff --name-status <fromSHA>..HEAD` | `[]Change{Status, Path}` |
+| `DiffNameStatus(root, fromSHA)` | `diff --name-status <fromSHA>..HEAD` | `[]Change{Status, Path, OldPath}` |
 | `History(root, maxCommits)` | `log --no-merges --numstat` | `[]FileStat` (per-file churn/authors; powers the `history` tool) |
 
 ## Edge cases

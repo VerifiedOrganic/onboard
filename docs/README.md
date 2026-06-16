@@ -29,8 +29,9 @@ this index made. Start with the path that matches what you're trying to do:
 | [getting-started.md](getting-started.md) | The guided first run: build, install, `doctor`, the `/onboard` tour, your first tool call — with what to expect at each step. |
 | [concepts.md](concepts.md) | The mental model: skills vs tools, why edges are rumours, honesty as a feature, the guide cache, and the one rule the whole design bends around. |
 | [install.md](install.md) | Wiring the binary into supported agents — the config-shape matrix, idempotent merging, `doctor`, and the full command reference. |
-| [mcp-tools.md](mcp-tools.md) | Reference for all 17 MCP tools plus the resources and prompts — exact input/output fields and behavior. |
-| [skills.md](skills.md) | The embedded skill system: the five skills, one source of truth reaching every agent three ways, and the `SKILL.md` frontmatter contract. |
+| [trust.md](trust.md) | Local execution, config writes, caches, HTTP mode, and the trust boundary for a code-reading binary. |
+| [mcp-tools.md](mcp-tools.md) | Reference for all 18 MCP tools plus the resources and prompts — exact input/output fields and behavior. |
+| [skills.md](skills.md) | The embedded skill system: the six skills, one source of truth reaching every agent three ways, and the `SKILL.md` frontmatter contract. |
 | [guide-cache.md](guide-cache.md) | The durable, git-SHA-tagged codebase guide: where it lives (inside `.git`), its header format, and the read / write / delta lifecycle. |
 | [architecture.md](architecture.md) | The big picture: the dual server/CLI binary, component map, request lifecycle, and the design principles every other choice follows from. |
 | [code-graph.md](code-graph.md) | The pure-Go tree-sitter engine: recon, definition/reference extraction, name+scope resolution, `trace_flow`, `impact`, `render_map`, providers, and the honest accuracy ceiling. |
@@ -41,10 +42,10 @@ this index made. Start with the path that matches what you're trying to do:
 ## The one-minute version
 
 - **What it is:** a binary you install once that any MCP-capable agent (Claude Code, Codex,
-  Grok, opencode, Cursor, Copilot CLI, Junie CLI) can launch as a server. Also runs
+  Grok, Kimi CLI, opencode, Cursor, Copilot CLI, Junie CLI) can launch as a server. Also runs
   headless / in CI over HTTP.
-- **What it gives an agent:** the `onboard-codebase-walkthrough` skill (and four siblings) for *how
-  to teach* a codebase, plus 17 tools — `recon`, `trace_flow`, `impact`, `dead_code`,
+- **What it gives an agent:** the `onboard-codebase-walkthrough` skill (and five siblings) for *how
+  to teach* a codebase, plus 18 tools — `recon`, `trace_flow`, `impact`, `dead_code`,
   `explain_diff`, `render_map`, a durable `guide` cache, and more — for *the facts* to teach
   from.
 - **Why a binary and not just a skill file:** every agent has its own skill format, but they

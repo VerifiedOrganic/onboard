@@ -1,26 +1,18 @@
-// Package providers builds a code graph (symbols + call edges) for a repository.
-//
-// Two implementations sit behind one interface:
-//
-//   - Builtin: a pure-Go tree-sitter engine (gotreesitter) that extracts symbol
-//     definitions and call references for ~200 languages, then links them by
-//     name + lexical scope. Tags are SYNTACTIC, so the resulting call graph is a
-//     name-resolution heuristic, not a type-checked one — same-named symbols
-//     across scopes, dynamic dispatch, and higher-order calls are its accuracy
-//     ceiling. Callers should present results as "likely", not "proven".
-//   - Null: a regex fallback that lists definitions only (no call edges). Used
-//     when the Builtin engine cannot index a tree at all.
+// Package providers defines the code graph model (symbols, edges, PageRank) and
+// language-specific taggers. Syntactic indexing lives in [indexer]; semantic
+// enrichment lives in [precision].
 package providers
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/VerifiedOrganic/onboard/internal/ignore"
+	"github.com/VerifiedOrganic/onboard/internal/pathutil"
 )
 
 // Symbol is a definition discovered in the source.
@@ -53,6 +45,9 @@ type Symbol struct {
 // (HTMLRenderer.Render) so same-named methods on different types are legible, while a
 // plain function returns its bare name.
 func (s *Symbol) Display() string {
+	if s == nil {
+		return ""
+	}
 	if s.Recv != "" {
 		if strings.EqualFold(s.Lang, "rust") {
 			return s.Recv + "::" + s.Name
@@ -86,12 +81,14 @@ type Graph struct {
 	PrecisionNotes []string `json:"precision_notes,omitempty"`
 
 	// Incremental-indexing stats: how many files were reused from the on-disk cache
-	// vs. re-parsed. Unexported, so never serialized over MCP; observed only in tests.
-	reused, retagged int
+	// vs. re-parsed. Never serialized over MCP; observed only in tests.
+	Reused, Retagged int `json:"-"`
 }
 
-// edgeKey identifies a directed caller->callee edge in ProvenEdges.
-func edgeKey(caller, callee string) string { return caller + "\x00" + callee }
+// EdgeKey identifies a directed caller->callee edge in ProvenEdges.
+func EdgeKey(caller, callee string) string { return caller + "\x00" + callee }
+
+func edgeKey(caller, callee string) string { return EdgeKey(caller, callee) }
 
 // IsProven reports whether the caller->callee edge was confirmed by a precision layer
 // (type-checked), as opposed to inferred syntactically.
@@ -138,6 +135,11 @@ type Provider interface {
 	Index(ctx context.Context, root string) (*Graph, error)
 }
 
+// Indexer indexes a repository, optionally using a persistent per-file cache at cachePath.
+type Indexer interface {
+	IndexWithCache(ctx context.Context, root, cachePath string) (*Graph, error)
+}
+
 // Callees returns the direct callees of qname.
 func (g *Graph) Callees(qname string) []string { return dedupeSort(g.Forward[qname]) }
 
@@ -167,6 +169,9 @@ func (g *Graph) FindSymbols(query string) []*Symbol {
 	var exact, sub []*Symbol
 	seen := map[string]bool{}
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		switch {
 		case s.Name == query || s.QName == query || s.Display() == query:
 			exact = append(exact, s)
@@ -179,11 +184,28 @@ func (g *Graph) FindSymbols(query string) []*Symbol {
 		}
 	}
 	out := append(exact, sub...)
-	sort.Slice(out, func(i, j int) bool { return out[i].QName < out[j].QName })
+	slices.SortFunc(out, func(a, b *Symbol) int {
+		return cmp.Compare(a.QName, b.QName)
+	})
 	return out
 }
 
 // PageRank-based ranking (PageRank, expandSeeds) lives in pagerank.go.
+
+// GraphHasLang reports whether g lists lang among its indexed languages.
+func GraphHasLang(g *Graph, lang string) bool {
+	for _, l := range g.Langs {
+		if strings.EqualFold(l, lang) {
+			return true
+		}
+	}
+	return false
+}
+
+// PosKey builds a lookup key for (file, line, name) symbol resolution.
+func PosKey(slashFile string, line int, name string) string {
+	return slashFile + "\x00" + strconv.Itoa(line) + "\x00" + name
+}
 
 func dedupeSort(in []string) []string {
 	if len(in) == 0 {
@@ -196,22 +218,23 @@ func dedupeSort(in []string) []string {
 	return sortedKeys(seen)
 }
 
+// SortedKeys returns the keys of m in sorted order.
+func SortedKeys(m map[string]bool) []string {
+	return sortedKeys(m)
+}
+
 func sortedKeys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
-func appendUnique(list []string, v string) []string {
-	for _, x := range list {
-		if x == v {
-			return list
-		}
-	}
-	return append(list, v)
+// UniqueQName returns a file-unique qualified name for a symbol definition.
+func UniqueQName(defs map[string]*Symbol, rel, name string, line int) string {
+	return uniqueQName(defs, rel, name, line)
 }
 
 func uniqueQName(defs map[string]*Symbol, rel, name string, line int) string {
@@ -229,22 +252,90 @@ func uniqueQName(defs map[string]*Symbol, rel, name string, line int) string {
 	}
 }
 
+// GraphEdgeSet tracks directed edges while deduplicating additions.
+type GraphEdgeSet struct {
+	forward map[string]map[string]bool
+	reverse map[string]map[string]bool
+}
+
+// NewGraphEdgeSet returns an empty edge set.
+func NewGraphEdgeSet() *GraphEdgeSet {
+	return newGraphEdgeSet()
+}
+
+func newGraphEdgeSet() *GraphEdgeSet {
+	return &GraphEdgeSet{
+		forward: map[string]map[string]bool{},
+		reverse: map[string]map[string]bool{},
+	}
+}
+
+// EdgeSetFromGraph seeds a set from an existing graph's forward edges.
+func EdgeSetFromGraph(g *Graph) *GraphEdgeSet {
+	return edgeSetFromGraph(g)
+}
+
+func edgeSetFromGraph(g *Graph) *GraphEdgeSet {
+	set := newGraphEdgeSet()
+	if g == nil {
+		return set
+	}
+	for caller, callees := range g.Forward {
+		for _, callee := range callees {
+			set.mark(caller, callee)
+		}
+	}
+	return set
+}
+
+// Add records caller->callee on g when not already present.
+func (s *GraphEdgeSet) Add(g *Graph, caller, callee string) bool {
+	return s.add(g, caller, callee)
+}
+
+func (s *GraphEdgeSet) add(g *Graph, caller, callee string) bool {
+	if caller == "" || callee == "" || caller == callee {
+		return false
+	}
+	if s.has(caller, callee) {
+		return false
+	}
+	s.mark(caller, callee)
+	g.Forward[caller] = append(g.Forward[caller], callee)
+	g.Reverse[callee] = append(g.Reverse[callee], caller)
+	return true
+}
+
+func (s *GraphEdgeSet) has(caller, callee string) bool {
+	return s.forward[caller] != nil && s.forward[caller][callee]
+}
+
+func (s *GraphEdgeSet) mark(caller, callee string) {
+	if s.forward[caller] == nil {
+		s.forward[caller] = map[string]bool{}
+	}
+	if s.reverse[callee] == nil {
+		s.reverse[callee] = map[string]bool{}
+	}
+	s.forward[caller][callee] = true
+	s.reverse[callee][caller] = true
+}
+
+// NormalizeRoot resolves root to an absolute path.
+func NormalizeRoot(root string) (string, error) {
+	return normalizeRoot(root)
+}
+
 func normalizeRoot(root string) (string, error) {
 	if root == "" {
 		root = "."
 	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("root %q is not a directory", abs)
-	}
-	return abs, nil
+	return pathutil.ResolveRoot(root)
+}
+
+// SkipDir reports whether a directory name should be excluded from indexing.
+func SkipDir(name string) bool {
+	return skipDir(name)
 }
 
 func skipDir(name string) bool {

@@ -51,11 +51,16 @@ func TestRenderMapHTMLExplicit(t *testing.T) {
 		t.Errorf("node count = %d, want 2", out.NodeCount)
 	}
 	for _, want := range []string{
-		"<!doctype html>", "class=\"mermaid\"", "flowchart LR",
-		"auth", "db", `auth -->|"queries"| db`, "onNode", "svg-pan-zoom", "Auth flow",
+		"<!doctype html>", "<svg id=\"svg\"", "flowchart LR",
+		"auth", "db", `auth --\u003e|\"queries\"| db`, "showNode", "Reset", "Auth flow",
 	} {
 		if !strings.Contains(out.Content, want) {
 			t.Errorf("HTML missing %q", want)
+		}
+	}
+	for _, blocked := range []string{"https://", "cdn.jsdelivr.net", "svg-pan-zoom", "src=\"http", "import mermaid"} {
+		if strings.Contains(out.Content, blocked) {
+			t.Errorf("self-contained HTML should not reference %q", blocked)
 		}
 	}
 	// details JSON must carry the description for the click panel
@@ -64,9 +69,32 @@ func TestRenderMapHTMLExplicit(t *testing.T) {
 	}
 }
 
-func TestRenderMapWritesFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "out", "map.html")
+func TestRenderMapHTMLEscapesTopicInAttributes(t *testing.T) {
+	topic := `Arch" onload="alert(1)<script>`
 	out, err := renderMap(context.Background(), renderMapInput{
+		Topic:  topic,
+		Format: "html",
+		Nodes:  []mapNode{{ID: "n1", Label: "One"}, {ID: "n2", Label: "Two"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.Content, `aria-label="Arch" onload=`) {
+		t.Fatal("topic quote escaped out of aria-label attribute")
+	}
+	if strings.Contains(out.Content, topic) {
+		t.Fatal("raw topic appears unescaped in HTML")
+	}
+	if !strings.Contains(out.Content, "Arch&#34; onload=&#34;alert(1)&lt;script&gt;") {
+		t.Fatalf("escaped topic missing from HTML:\n%s", out.Content)
+	}
+}
+
+func TestRenderMapWritesFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "out", "map.html")
+	out, err := renderMap(context.Background(), renderMapInput{
+		Root:       root,
 		Topic:      "X",
 		Format:     "html",
 		Nodes:      []mapNode{{ID: "n1", Label: "One"}, {ID: "n2", Label: "Two"}},
@@ -75,8 +103,13 @@ func TestRenderMapWritesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Path != path {
-		t.Errorf("Path = %q, want %q", out.Path, path)
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(realRoot, "out", "map.html")
+	if out.Path != wantPath {
+		t.Errorf("Path = %q, want %q", out.Path, wantPath)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -84,6 +117,46 @@ func TestRenderMapWritesFile(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "<!doctype html>") {
 		t.Error("written file is not the rendered HTML")
+	}
+}
+
+func TestRenderMapRejectsOutputPathOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "map.html")
+	_, err := renderMap(context.Background(), renderMapInput{
+		Root:       root,
+		Topic:      "X",
+		Format:     "html",
+		Nodes:      []mapNode{{ID: "n1", Label: "One"}, {ID: "n2", Label: "Two"}},
+		OutputPath: outside,
+	})
+	if err == nil {
+		t.Fatal("expected output path outside root to be rejected")
+	}
+	if !strings.Contains(err.Error(), "must stay within repo root") {
+		t.Fatalf("error = %v, want repo-root restriction", err)
+	}
+}
+
+func TestRenderMapRejectsSymlinkedOutputPathOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	_, err := renderMap(context.Background(), renderMapInput{
+		Root:       root,
+		Topic:      "X",
+		Format:     "html",
+		Nodes:      []mapNode{{ID: "n1", Label: "One"}, {ID: "n2", Label: "Two"}},
+		OutputPath: filepath.Join(link, "map.html"),
+	})
+	if err == nil {
+		t.Fatal("expected symlinked output path outside root to be rejected")
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "map.html")); !os.IsNotExist(statErr) {
+		t.Fatalf("outside file was written or stat failed unexpectedly: %v", statErr)
 	}
 }
 

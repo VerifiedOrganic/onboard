@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,17 +58,18 @@ func commit(t *testing.T, dir, file, content, msg string) {
 
 func TestAvailableAndHead(t *testing.T) {
 	repo := initRepo(t)
-	if !Available(repo) {
+	ctx := context.Background()
+	if !Available(ctx, repo) {
 		t.Fatal("Available should be true in a git repo")
 	}
-	if Available(t.TempDir()) {
+	if Available(ctx, t.TempDir()) {
 		t.Error("Available should be false outside a repo")
 	}
-	sha, err := HeadSHA(repo)
+	sha, err := HeadSHA(ctx, repo)
 	if err != nil || len(sha) < 7 {
 		t.Fatalf("HeadSHA = %q, err = %v", sha, err)
 	}
-	br, err := Branch(repo)
+	br, err := Branch(ctx, repo)
 	if err != nil || br == "" {
 		t.Fatalf("Branch = %q, err = %v", br, err)
 	}
@@ -75,7 +77,7 @@ func TestAvailableAndHead(t *testing.T) {
 
 func TestCommonDir(t *testing.T) {
 	repo := initRepo(t)
-	dir, err := CommonDir(repo)
+	dir, err := CommonDir(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,12 +91,13 @@ func TestCommonDir(t *testing.T) {
 
 func TestDiffNameStatus(t *testing.T) {
 	repo := initRepo(t)
-	from, _ := HeadSHA(repo)
+	ctx := context.Background()
+	from, _ := HeadSHA(ctx, repo)
 	commit(t, repo, "b.txt", "new file\n", "add b")
 	commit(t, repo, "space name.txt", "spaced\n", "add spaced name")
 	commit(t, repo, "a.txt", "changed\n", "modify a")
 
-	changes, err := DiffNameStatus(repo, from)
+	changes, err := DiffNameStatus(ctx, repo, from)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,8 +116,8 @@ func TestDiffNameStatus(t *testing.T) {
 	}
 
 	// No changes from HEAD to HEAD.
-	head, _ := HeadSHA(repo)
-	if c, _ := DiffNameStatus(repo, head); len(c) != 0 {
+	head, _ := HeadSHA(ctx, repo)
+	if c, _ := DiffNameStatus(ctx, repo, head); len(c) != 0 {
 		t.Errorf("expected no changes from HEAD..HEAD, got %v", c)
 	}
 }
@@ -126,8 +129,8 @@ func TestParseNameStatusZ(t *testing.T) {
 	}
 	want := []Change{
 		{Status: "M", Path: "space name.txt"},
-		{Status: "R100", Path: "new name.go"},
-		{Status: "C75", Path: "new copy.go"},
+		{Status: "R100", Path: "new name.go", OldPath: "old name.go"},
+		{Status: "C75", Path: "new copy.go", OldPath: "old copy.go"},
 	}
 	for i := range want {
 		if changes[i] != want[i] {
@@ -200,12 +203,13 @@ func TestParseHunkHeaderSingleLine(t *testing.T) {
 
 func TestDiffAndDefaultBase(t *testing.T) {
 	repo := initRepo(t) // one commit on main: a.txt
-	base, _ := HeadSHA(repo)
+	ctx := context.Background()
+	base, _ := HeadSHA(ctx, repo)
 
 	commit(t, repo, "feature.go", "package p\nfunc New() {}\n", "add feature")
 	commit(t, repo, "a.txt", "one\ntwo\n", "extend a")
 
-	diffs, err := Diff(repo, base)
+	diffs, err := Diff(ctx, repo, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +225,7 @@ func TestDiffAndDefaultBase(t *testing.T) {
 	}
 
 	// DefaultBase resolves the merge-base with main; on this branch that is the first commit.
-	if db := DefaultBase(repo); db == "" {
+	if db := DefaultBase(ctx, repo); db == "" {
 		t.Error("DefaultBase should resolve a base when main exists")
 	}
 }

@@ -12,7 +12,8 @@ import (
 	"github.com/odvcencio/gotreesitter/grammars"
 )
 
-const jsTagsQuery = `
+// JSTagsQuery is the explicit tree-sitter tags query for JavaScript.
+const JSTagsQuery = `
 (function_declaration (identifier) @name) @definition.function
 (variable_declarator name: (identifier) @name value: (arrow_function)) @definition.function
 (variable_declarator name: (identifier) @name value: (function_expression)) @definition.function
@@ -34,7 +35,8 @@ const jsTagsQuery = `
 (jsx_opening_element name: (member_expression property: (property_identifier) @name)) @reference.call
 `
 
-const tsTagsQuery = `
+// TSTagsQuery is the explicit tree-sitter tags query for TypeScript.
+const TSTagsQuery = `
 (function_declaration (identifier) @name) @definition.function
 (variable_declarator name: (identifier) @name value: (arrow_function)) @definition.function
 (variable_declarator name: (identifier) @name value: (function_expression)) @definition.function
@@ -63,7 +65,8 @@ const tsTagsQuery = `
 (new_expression constructor: (member_expression property: (property_identifier) @name)) @reference.call
 `
 
-const tsxTagsQuery = tsTagsQuery + `
+// TSXTagsQuery is the explicit tree-sitter tags query for TSX.
+const TSXTagsQuery = TSTagsQuery + `
 (jsx_self_closing_element name: (identifier) @name) @reference.call
 (jsx_self_closing_element name: (member_expression property: (property_identifier) @name)) @reference.call
 (jsx_opening_element name: (identifier) @name) @reference.call
@@ -72,6 +75,11 @@ const tsxTagsQuery = tsTagsQuery + `
 
 var esmImportRe = regexp.MustCompile(`(?m)import\s+(?:([\w$]+)\s*,\s*)?(?:(\*)\s+as\s+([\w$]+)|{([^}]+)})?\s*from\s*['"]([^'"]+)['"]`)
 var requireImportRe = regexp.MustCompile(`(?m)\bconst\s+(?:([\w$]+)|{([^}]+)})\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)`)
+
+// JSRefHint extracts receiver hints for a JavaScript/TypeScript call reference.
+func JSRefHint(src []byte, tagStart, nameStart uint32) (recv string, allowBare bool) {
+	return jsRefHint(src, tagStart, nameStart)
+}
 
 func jsRefHint(src []byte, tagStart, nameStart uint32) (recv string, allowBare bool) {
 	allowBare = true
@@ -99,7 +107,7 @@ func getOrBuildTagger(name string, taggers map[string]*ts.Tagger) *ts.Tagger {
 	if entry == nil {
 		return nil
 	}
-	tagger := buildTagger(entry)
+	tagger := BuildTagger(entry)
 	taggers[name] = tagger
 	return tagger
 }
@@ -116,8 +124,13 @@ func getExtForLang(name string) string {
 	return "js"
 }
 
-func parseJSImports(root, rel string, src []byte) map[string]resolvedImport {
-	imports := make(map[string]resolvedImport)
+// ParseJSImports extracts ESM/CJS import aliases from a JavaScript/TypeScript file.
+func ParseJSImports(root, rel string, src []byte) map[string]ResolvedImport {
+	return parseJSImports(root, rel, src)
+}
+
+func parseJSImports(root, rel string, src []byte) map[string]ResolvedImport {
+	imports := make(map[string]ResolvedImport)
 	srcStr := string(src)
 
 	// 1. ESM Imports
@@ -133,10 +146,10 @@ func parseJSImports(root, rel string, src []byte) map[string]resolvedImport {
 		}
 
 		if defaultImport != "" {
-			imports[defaultImport] = resolvedImport{targetFile: targetFile, targetName: "default"}
+			imports[defaultImport] = ResolvedImport{TargetFile: targetFile, TargetName: "default"}
 		}
 		if namespaceImport != "" {
-			imports[namespaceImport] = resolvedImport{targetFile: targetFile, targetName: "*"}
+			imports[namespaceImport] = ResolvedImport{TargetFile: targetFile, TargetName: "*"}
 		}
 		if namedImports != "" {
 			for _, part := range strings.Split(namedImports, ",") {
@@ -148,9 +161,9 @@ func parseJSImports(root, rel string, src []byte) map[string]resolvedImport {
 					parts := strings.Split(part, " as ")
 					orig := strings.TrimSpace(parts[0])
 					alias := strings.TrimSpace(parts[1])
-					imports[alias] = resolvedImport{targetFile: targetFile, targetName: orig}
+					imports[alias] = ResolvedImport{TargetFile: targetFile, TargetName: orig}
 				} else {
-					imports[part] = resolvedImport{targetFile: targetFile, targetName: part}
+					imports[part] = ResolvedImport{TargetFile: targetFile, TargetName: part}
 				}
 			}
 		}
@@ -168,7 +181,7 @@ func parseJSImports(root, rel string, src []byte) map[string]resolvedImport {
 		}
 
 		if defaultImport != "" {
-			imports[defaultImport] = resolvedImport{targetFile: targetFile, targetName: "default"}
+			imports[defaultImport] = ResolvedImport{TargetFile: targetFile, TargetName: "default"}
 		}
 		if namedImports != "" {
 			for _, part := range strings.Split(namedImports, ",") {
@@ -180,9 +193,9 @@ func parseJSImports(root, rel string, src []byte) map[string]resolvedImport {
 					parts := strings.Split(part, ":")
 					orig := strings.TrimSpace(parts[0])
 					alias := strings.TrimSpace(parts[1])
-					imports[alias] = resolvedImport{targetFile: targetFile, targetName: orig}
+					imports[alias] = ResolvedImport{TargetFile: targetFile, TargetName: orig}
 				} else {
-					imports[part] = resolvedImport{targetFile: targetFile, targetName: part}
+					imports[part] = ResolvedImport{TargetFile: targetFile, TargetName: part}
 				}
 			}
 		}
@@ -289,9 +302,14 @@ func resolveTsconfigPath(root, importPath string) string {
 	return ""
 }
 
-func tagSvelteFile(rel string, src []byte, taggers map[string]*ts.Tagger) ([]*Symbol, []rawRef) {
+// TagSvelteFile extracts definitions and references from a Svelte source file.
+func TagSvelteFile(rel string, src []byte, taggers map[string]*ts.Tagger) ([]*Symbol, []RawRef) {
+	return tagSvelteFile(rel, src, taggers)
+}
+
+func tagSvelteFile(rel string, src []byte, taggers map[string]*ts.Tagger) ([]*Symbol, []RawRef) {
 	var defs []*Symbol
-	var refs []rawRef
+	var refs []RawRef
 
 	// Svelte implicit component symbols
 	compName := strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
@@ -341,7 +359,7 @@ func tagSvelteFile(rel string, src []byte, taggers map[string]*ts.Tagger) ([]*Sy
 		}
 
 		scriptSrcBytes := []byte(scriptContent)
-		tags := safeTag(tagger, scriptSrcBytes)
+		tags := SafeTag(tagger, scriptSrcBytes)
 		if len(tags) == 0 {
 			continue
 		}
@@ -356,7 +374,7 @@ func tagSvelteFile(rel string, src []byte, taggers map[string]*ts.Tagger) ([]*Sy
 		}
 
 		for _, ref := range scriptRefs {
-			ref.callerFile = rel
+			ref.CallerFile = rel
 			refs = append(refs, ref)
 		}
 	}
@@ -369,11 +387,11 @@ func tagSvelteFile(rel string, src []byte, taggers map[string]*ts.Tagger) ([]*Sy
 	templateRefs := scanTemplateRefs(maskedSrc, false)
 	caller := rel + "::(top-level)"
 	for _, r := range templateRefs {
-		refs = append(refs, rawRef{
-			callerQName: caller,
-			callerFile:  rel,
-			calleeName:  r,
-			allowBare:   true,
+		refs = append(refs, RawRef{
+			CallerQName: caller,
+			CallerFile:  rel,
+			CalleeName:  r,
+			AllowBare:   true,
 		})
 	}
 
@@ -409,16 +427,21 @@ func uniqueQNameForSvelte(defs []*Symbol, rel, name string, line int) string {
 	}
 }
 
-func tagHTMLFile(rel string, src []byte) ([]*Symbol, []rawRef) {
-	var refs []rawRef
+// TagHTMLFile extracts template call references from an HTML source file.
+func TagHTMLFile(rel string, src []byte) ([]*Symbol, []RawRef) {
+	return tagHTMLFile(rel, src)
+}
+
+func tagHTMLFile(rel string, src []byte) ([]*Symbol, []RawRef) {
+	var refs []RawRef
 	templateRefs := scanTemplateRefs(src, true)
 	caller := rel + "::(top-level)"
 	for _, r := range templateRefs {
-		refs = append(refs, rawRef{
-			callerQName: caller,
-			callerFile:  rel,
-			calleeName:  r,
-			allowBare:   true,
+		refs = append(refs, RawRef{
+			CallerQName: caller,
+			CallerFile:  rel,
+			CalleeName:  r,
+			AllowBare:   true,
 		})
 	}
 	return nil, refs

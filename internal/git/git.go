@@ -4,27 +4,42 @@
 package git
 
 import (
+	"archive/tar"
+	"cmp"
+	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/VerifiedOrganic/onboard/internal/apperrors"
+)
+
+const gitCommandTimeout = 30 * time.Second
+const (
+	maxArchiveFileBytes  int64 = 100 << 20
+	maxArchiveTotalBytes int64 = 500 << 20
 )
 
 // Available reports whether git is on PATH and root is inside a work tree.
-func Available(root string) bool {
+func Available(ctx context.Context, root string) bool {
 	if _, err := exec.LookPath("git"); err != nil {
 		return false
 	}
-	out, err := run(root, "rev-parse", "--is-inside-work-tree")
+	out, err := run(ctx, root, "rev-parse", "--is-inside-work-tree")
 	return err == nil && strings.TrimSpace(out) == "true"
 }
 
 // CommonDir returns the absolute path of the repo's common git directory.
 // (Using the *common* dir keeps caches stable across worktrees.)
-func CommonDir(root string) (string, error) {
-	out, err := run(root, "rev-parse", "--git-common-dir")
+func CommonDir(ctx context.Context, root string) (string, error) {
+	out, err := run(ctx, root, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
@@ -36,26 +51,27 @@ func CommonDir(root string) (string, error) {
 }
 
 // HeadSHA returns the full commit SHA of HEAD.
-func HeadSHA(root string) (string, error) {
-	out, err := run(root, "rev-parse", "HEAD")
+func HeadSHA(ctx context.Context, root string) (string, error) {
+	out, err := run(ctx, root, "rev-parse", "HEAD")
 	return strings.TrimSpace(out), err
 }
 
 // Branch returns the current branch name (or "HEAD" when detached).
-func Branch(root string) (string, error) {
-	out, err := run(root, "rev-parse", "--abbrev-ref", "HEAD")
+func Branch(ctx context.Context, root string) (string, error) {
+	out, err := run(ctx, root, "rev-parse", "--abbrev-ref", "HEAD")
 	return strings.TrimSpace(out), err
 }
 
 // Change is one entry from `git diff --name-status`.
 type Change struct {
-	Status string `json:"status"` // A, M, D, Rxxx, ...
-	Path   string `json:"path"`
+	Status  string `json:"status"` // A, M, D, Rxxx, ...
+	Path    string `json:"path"`   // current/new path
+	OldPath string `json:"old_path,omitempty"`
 }
 
 // DiffNameStatus returns the files changed from fromSHA to HEAD.
-func DiffNameStatus(root, fromSHA string) ([]Change, error) {
-	out, err := run(root, "diff", "--name-status", "-z", fromSHA+"..HEAD")
+func DiffNameStatus(ctx context.Context, root, fromSHA string) ([]Change, error) {
+	out, err := run(ctx, root, "diff", "--name-status", "-z", fromSHA+"..HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -76,15 +92,17 @@ func parseNameStatusZ(out string) []Change {
 		}
 		path := fields[i]
 		i++
-		// Rename/copy records are status, old path, new path. Keep the new path.
+		oldPath := ""
+		// Rename/copy records are status, old path, new path. Keep both.
 		if strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C") {
+			oldPath = path
 			if i >= len(fields) {
 				break
 			}
 			path = fields[i]
 			i++
 		}
-		changes = append(changes, Change{Status: status, Path: path})
+		changes = append(changes, Change{Status: status, Path: path, OldPath: oldPath})
 	}
 	return changes
 }
@@ -103,15 +121,127 @@ type FileDiff struct {
 	Hunks  []Hunk `json:"-"`
 }
 
+// ValidateRef checks that ref is safe to pass to git and resolves to a commit.
+func ValidateRef(ctx context.Context, root, ref string) error {
+	if ref == "" {
+		return fmt.Errorf("%w: empty ref", apperrors.ErrInvalidGitRef)
+	}
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("%w: %q looks like a flag", apperrors.ErrInvalidGitRef, ref)
+	}
+	if strings.Contains(ref, "\x00") {
+		return fmt.Errorf("%w: null byte in ref", apperrors.ErrInvalidGitRef)
+	}
+	if !RefExists(ctx, root, ref) {
+		return fmt.Errorf("%w: %q does not resolve to a commit", apperrors.ErrInvalidGitRef, ref)
+	}
+	return nil
+}
+
 // Diff returns the per-file changes between base and the working tree — committed *and*
 // uncommitted work since base, for tracked files (untracked files are not shown by git
 // diff). unified=0 keeps the hunks tight so they attribute to symbols precisely.
-func Diff(root, base string) ([]FileDiff, error) {
-	out, err := run(root, "diff", "--unified=0", "--no-color", "--find-renames", base, "--")
+func Diff(ctx context.Context, root, base string) ([]FileDiff, error) {
+	if err := ValidateRef(ctx, root, base); err != nil {
+		return nil, err
+	}
+	out, err := run(ctx, root, "diff", "--unified=0", "--no-color", "--find-renames", base, "--")
 	if err != nil {
 		return nil, err
 	}
 	return parseUnifiedDiff(out), nil
+}
+
+// ArchiveTree materializes ref into dst using `git archive`. It is intended for read-only
+// analysis of base-side state, such as computing the blast radius of deleted symbols.
+func ArchiveTree(ctx context.Context, root, ref, dst string) error {
+	if err := ValidateRef(ctx, root, ref); err != nil {
+		return err
+	}
+	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", ref)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	tr := tar.NewReader(stdout)
+	var totalBytes int64
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = cmd.Wait()
+			return err
+		}
+		name := filepath.Clean(filepath.FromSlash(hdr.Name))
+		isCurrentOrParent := name == "." || name == ".."
+		isAbsolute := filepath.IsAbs(name)
+		escapesArchiveRoot := strings.HasPrefix(name, ".."+string(filepath.Separator))
+		if isCurrentOrParent || isAbsolute || escapesArchiveRoot {
+			_ = cmd.Wait()
+			return fmt.Errorf("git archive contained unsafe path %q", hdr.Name)
+		}
+		target := filepath.Join(dst, name)
+		rel, err := filepath.Rel(dst, target)
+		relEscapesDestination := rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		if err != nil || relEscapesDestination {
+			_ = cmd.Wait()
+			return fmt.Errorf("git archive path %q escapes destination", hdr.Name)
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o700); err != nil {
+				_ = cmd.Wait()
+				return err
+			}
+		case tar.TypeReg:
+			if hdr.Size < 0 || hdr.Size > maxArchiveFileBytes {
+				_ = cmd.Wait()
+				return fmt.Errorf("git archive file %q has unsupported size %d", hdr.Name, hdr.Size)
+			}
+			totalBytes += hdr.Size
+			if totalBytes > maxArchiveTotalBytes {
+				_ = cmd.Wait()
+				return fmt.Errorf("git archive exceeds maximum extracted size %d", maxArchiveTotalBytes)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				_ = cmd.Wait()
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, tarFilePerm(hdr.Mode))
+			if err != nil {
+				_ = cmd.Wait()
+				return err
+			}
+			// #nosec G110 -- git archive extraction is bounded by per-file and total byte limits above.
+			_, copyErr := io.CopyN(f, tr, hdr.Size)
+			closeErr := f.Close()
+			if copyErr != nil {
+				_ = cmd.Wait()
+				return copyErr
+			}
+			if closeErr != nil {
+				_ = cmd.Wait()
+				return closeErr
+			}
+		}
+	}
+	return cmd.Wait()
+}
+
+func tarFilePerm(mode int64) os.FileMode {
+	if mode < 0 {
+		return 0o600
+	}
+	perm := mode & 0o777
+	// #nosec G115 -- perm is masked to Unix permission bits before conversion.
+	return os.FileMode(uint32(perm))
 }
 
 // parseUnifiedDiff parses `git diff --unified=0` output into per-file changes. It is a
@@ -198,24 +328,24 @@ func parseHunkHeader(line string) (Hunk, bool) {
 }
 
 // RefExists reports whether ref resolves to a commit.
-func RefExists(root, ref string) bool {
-	_, err := run(root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+func RefExists(ctx context.Context, root, ref string) bool {
+	_, err := run(ctx, root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 	return err == nil
 }
 
 // MergeBase returns the best common ancestor of HEAD and ref, or "" with an error.
-func MergeBase(root, ref string) (string, error) {
-	out, err := run(root, "merge-base", "HEAD", ref)
+func MergeBase(ctx context.Context, root, ref string) (string, error) {
+	out, err := run(ctx, root, "merge-base", "HEAD", ref)
 	return strings.TrimSpace(out), err
 }
 
 // DefaultBase picks a sensible review base: the merge-base of HEAD with the first of
 // origin/main, main, origin/master, master that exists. Returns "" if none resolve (e.g.
 // a repo with no default branch), leaving the caller to ask for an explicit base.
-func DefaultBase(root string) string {
+func DefaultBase(ctx context.Context, root string) string {
 	for _, ref := range []string{"origin/main", "main", "origin/master", "master"} {
-		if RefExists(root, ref) {
-			if mb, err := MergeBase(root, ref); err == nil && mb != "" {
+		if RefExists(ctx, root, ref) {
+			if mb, err := MergeBase(ctx, root, ref); err == nil && mb != "" {
 				return mb
 			}
 		}
@@ -238,13 +368,13 @@ type FileStat struct {
 // recent maxCommits commits (0 = all history). Merge commits are excluded. The result
 // is sorted by churn (commit count) descending, then path. High-churn, multi-author
 // files are onboarding hotspots and prime risk-audit targets.
-func History(root string, maxCommits int) ([]FileStat, error) {
+func History(ctx context.Context, root string, maxCommits int) ([]FileStat, error) {
 	// \x1f-delimited header per commit, then numstat lines: "<adds>\t<dels>\t<path>".
 	args := []string{"log", "--no-merges", "--numstat", "--format=\x1f%an\x1f%aI"}
 	if maxCommits > 0 {
 		args = append(args, fmt.Sprintf("-n%d", maxCommits))
 	}
-	out, err := run(root, args...)
+	out, err := run(ctx, root, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -304,11 +434,11 @@ func History(root string, maxCommits int) ([]FileStat, error) {
 			Deletions: a.dels, LastDate: last, Authors: len(a.authors),
 		})
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Commits != result[j].Commits {
-			return result[i].Commits > result[j].Commits
+	slices.SortFunc(result, func(a, b FileStat) int {
+		if c := cmp.Compare(b.Commits, a.Commits); c != 0 {
+			return c
 		}
-		return result[i].Path < result[j].Path
+		return cmp.Compare(a.Path, b.Path)
 	})
 	return result, nil
 }
@@ -334,9 +464,27 @@ func renameTarget(p string) string {
 	return p
 }
 
-func run(root string, args ...string) (string, error) {
+func run(ctx context.Context, root string, args ...string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
 	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	out, err := cmd.Output()
-	return string(out), err
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return string(out), fmt.Errorf("git %s timed out after %s: %w", strings.Join(args, " "), gitCommandTimeout, ctx.Err())
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return string(out), ctx.Err()
+	}
+	if err != nil {
+		combined := strings.TrimSpace(string(out) + " " + err.Error())
+		if strings.Contains(combined, "not a git repository") {
+			return string(out), fmt.Errorf("%w: %w", apperrors.ErrNotGitRepository, err)
+		}
+		return string(out), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return string(out), nil
 }

@@ -1,9 +1,10 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -48,7 +49,7 @@ type deadCodeOutput struct {
 
 func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 	out := deadCodeOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -64,6 +65,9 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 
 	var orphans []orphan
 	for q, sym := range g.Defs {
+		if sym == nil {
+			continue
+		}
 		if sym.Lang == "hcl" {
 			// Terraform has its own deadness rules: resources and module calls
 			// exist for their side effects and are never "dead"; variables,
@@ -107,14 +111,14 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 
 	// Highest confidence first, then file/line for a stable, reviewable order.
 	rank := map[string]int{"high": 0, "medium": 1, "low": 2}
-	sort.Slice(orphans, func(i, j int) bool {
-		if rank[orphans[i].Confidence] != rank[orphans[j].Confidence] {
-			return rank[orphans[i].Confidence] < rank[orphans[j].Confidence]
+	slices.SortFunc(orphans, func(a, b orphan) int {
+		if c := cmp.Compare(rank[a.Confidence], rank[b.Confidence]); c != 0 {
+			return c
 		}
-		if orphans[i].File != orphans[j].File {
-			return orphans[i].File < orphans[j].File
+		if c := cmp.Compare(a.File, b.File); c != 0 {
+			return c
 		}
-		return orphans[i].Line < orphans[j].Line
+		return cmp.Compare(a.Line, b.Line)
 	})
 
 	limit := in.Limit
@@ -347,10 +351,7 @@ func isEntryName(name string) bool {
 	return false
 }
 
-// isExported applies the common visibility conventions: a leading uppercase rune (Go and
-// other export-by-capitalization languages) means exported; a leading underscore (Python,
-// JS) means private. A heuristic — the note flags it as such.
-func isExported(name string) bool {
+func exportedByCapitalization(name string) bool {
 	if name == "" {
 		return false
 	}
@@ -361,14 +362,25 @@ func isExported(name string) bool {
 	return unicode.IsUpper(r)
 }
 
+func privateByConvention(name string) bool {
+	return strings.HasPrefix(name, "_")
+}
+
 func symbolExported(sym *providers.Symbol) bool {
 	if sym == nil {
 		return false
 	}
-	if strings.EqualFold(sym.Lang, "rust") {
+	switch strings.ToLower(sym.Lang) {
+	case "rust":
 		return sym.Public
+	case "go":
+		return exportedByCapitalization(sym.Name)
+	default:
+		// For languages where this indexer does not recover export syntax reliably
+		// (JS/TS/Python/Ruby/etc.), do not treat lowercase as private. A non-underscore
+		// function may be part of a package/module API even when nothing in-repo calls it.
+		return !privateByConvention(sym.Name)
 	}
-	return isExported(sym.Name)
 }
 
 func symbolCallableKind(sym *providers.Symbol) string {
@@ -392,9 +404,9 @@ func orphanConfidence(kind string, exported, precise bool) (confidence, reason s
 	case kind == "method":
 		return "medium", "method with no caller even after available semantic dispatch resolution"
 	case exported:
-		return "medium", "exported function with no in-repo caller — may be public API or used by an external importer"
+		return "medium", "public or externally reachable function with no in-repo caller — may be package API or used by an external importer"
 	default:
-		return "high", "unexported function with no caller — unreachable within this repo"
+		return "high", "private/unexported function with no caller — unreachable within this repo"
 	}
 }
 
@@ -403,6 +415,7 @@ func deadCodeNote(g *providers.Graph, requestedPrecise bool) string {
 		"framework/DI registration, build-tagged files, or external importers — verify before deleting. " +
 		"Entry points, framework-managed lifecycles (React, SvelteKit, Next.js, Angular, Storybook), " +
 		"generated files, and test functions are already excluded or marked low-confidence. " +
+		"For non-Go/Rust languages, non-underscore callables are treated as externally reachable because export syntax is not fully modeled. " +
 		"For Terraform/HCL, resources and module calls are never reported (they exist for their side effects); " +
 		"unused variables, locals, and outputs are."
 	if requestedPrecise && !g.Precise {
@@ -411,12 +424,9 @@ func deadCodeNote(g *providers.Graph, requestedPrecise bool) string {
 	return base + goPrecisionHint(g, requestedPrecise) + precisionNotes(g)
 }
 
-func registerDeadCodeTool(s *mcp.Server) {
+func registerDeadCodeTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "dead_code",
 		Description: "Find callable definitions (functions and methods) that nothing in the repo calls — a lead for code that was written but never wired in (common in fast/AI builds). Ranked by confidence; excludes entry points and tests. Leads, not proof: reflection, codegen, framework registration, and external importers can hide callers (pass precise:true for Go or Rust semantic enrichment when available).",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in deadCodeInput) (*mcp.CallToolResult, deadCodeOutput, error) {
-		out, err := deadCode(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler(rt, "dead_code", deadCode))
 }

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
 func graphFixture(t *testing.T) string {
@@ -59,16 +61,36 @@ func TestTraceFlowSequenceDiagram(t *testing.T) {
 		t.Fatalf("expected a sequenceDiagram, got:\n%s", out.Mermaid)
 	}
 	// Main calls Run, Run calls helper — both edges should appear as messages.
-	if !strings.Contains(out.Mermaid, "Main->>Run") {
+	if !strings.Contains(out.Mermaid, "participant app_go__Main as Main") {
+		t.Errorf("sequence should declare a QName-backed participant for Main:\n%s", out.Mermaid)
+	}
+	if !strings.Contains(out.Mermaid, "app_go__Main->>app_go__Run: Run") {
 		t.Errorf("sequence should show Main->>Run:\n%s", out.Mermaid)
 	}
-	if !strings.Contains(out.Mermaid, "Run->>helper") {
+	if !strings.Contains(out.Mermaid, "app_go__Run->>app_go__helper: helper") {
 		t.Errorf("sequence should show Run->>helper:\n%s", out.Mermaid)
 	}
 	// Without the format flag, no diagram is produced.
 	plain, _ := traceFlow(context.Background(), traceFlowInput{Root: root, Entry: "Main"})
 	if plain.Mermaid != "" {
 		t.Errorf("mermaid should be empty without format=mermaid, got:\n%s", plain.Mermaid)
+	}
+}
+
+func TestRenderSequenceDoesNotCollapseSameNamedSymbols(t *testing.T) {
+	g := &providers.Graph{Defs: map[string]*providers.Symbol{
+		"a.go::Run": {QName: "a.go::Run", Name: "Run", File: "a.go", Kind: "function"},
+		"b.go::Run": {QName: "b.go::Run", Name: "Run", File: "b.go", Kind: "function"},
+	}}
+	seq := renderSequence([]traceNode{
+		{QName: "a.go::Run", Callees: []string{"b.go::Run"}},
+		{QName: "b.go::Run"},
+	}, g)
+	if !strings.Contains(seq, "participant a_go__Run as Run") || !strings.Contains(seq, "participant b_go__Run as Run") {
+		t.Fatalf("same-named symbols should have distinct participants:\n%s", seq)
+	}
+	if !strings.Contains(seq, "a_go__Run->>b_go__Run: Run") {
+		t.Fatalf("message should use distinct participant IDs:\n%s", seq)
 	}
 }
 

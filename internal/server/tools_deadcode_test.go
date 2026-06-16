@@ -120,6 +120,34 @@ fn caller() { Engine::new().used() }
 	}
 }
 
+func TestDeadCodeNonGoLowercaseFunctionsAreNotHighConfidence(t *testing.T) {
+	root := t.TempDir()
+	writeRepoFile(t, root, "src/util.js", `
+export function publicApi() { return 1; }
+function _privateHelper() { return 2; }
+`)
+
+	out, err := deadCode(context.Background(), deadCodeInput{Root: root, Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]orphan{}
+	for _, o := range out.Orphans {
+		got[o.Symbol] = o
+	}
+	if o, ok := got["publicApi"]; !ok {
+		t.Fatalf("lowercase JS export should be listed as a dead-code lead; got %v", out.Orphans)
+	} else if !o.Exported || o.Confidence != "medium" {
+		t.Errorf("publicApi = exported %v confidence %q, want exported medium", o.Exported, o.Confidence)
+	}
+	if o, ok := got["_privateHelper"]; !ok {
+		t.Fatalf("underscore helper should be listed as a dead-code lead; got %v", out.Orphans)
+	} else if o.Exported || o.Confidence != "high" {
+		t.Errorf("_privateHelper = exported %v confidence %q, want private high", o.Exported, o.Confidence)
+	}
+}
+
 func TestDeadCodeFrameworkManagedExcluded(t *testing.T) {
 	root := t.TempDir()
 	// Next.js page default export

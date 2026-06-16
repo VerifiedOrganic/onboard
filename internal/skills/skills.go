@@ -5,11 +5,12 @@
 package skills
 
 import (
+	"cmp"
 	"embed"
 	"fmt"
 	"io/fs"
 	"path"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -51,7 +52,9 @@ func List() ([]Skill, error) {
 		}
 		out = append(out, Skill{Name: name, Description: desc, dir: dir})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b Skill) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
 	return out, nil
 }
 

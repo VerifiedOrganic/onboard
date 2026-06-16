@@ -1,9 +1,11 @@
-package providers
+package providers_test
 
 import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/indexer"
 )
 
 // Regression for the same-file name-clash bug: two same-named methods on different
@@ -18,7 +20,7 @@ func TestBuiltinSameFileNameClashLeftUnresolved(t *testing.T) {
 		"func (B) Do() {}\n\n"+
 		"func Caller(a A) { a.Do() }\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +53,7 @@ func TestBuiltinCrossFileAmbiguityLeftUnresolved(t *testing.T) {
 	write(t, root, "y.go", "package p\nfunc Helper() {}\n")
 	write(t, root, "z.go", "package p\nfunc Use() { Helper() }\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +70,7 @@ func TestBuiltinDefaultImportDoesNotGuessAmongMultipleExports(t *testing.T) {
 	write(t, root, "mod.js", "export function Alpha() {}\nexport function Beta() {}\n")
 	write(t, root, "app.js", "import Widget from './mod';\nexport function Use() { Widget(); }\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +87,7 @@ func TestBuiltinDefaultImportDoesNotGuessAmongMultipleExports(t *testing.T) {
 func TestBuiltinUniqueNameStillResolves(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "a.go", "package p\nfunc only() {}\nfunc Use() { only() }\n")
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +114,7 @@ func TestBuiltinSamePackageResolution(t *testing.T) {
 	write(t, root, "a/use.go", "package a\nfunc Use() { New() }\n")
 	write(t, root, "b/b.go", "package b\nfunc New() {}\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +144,7 @@ func TestBuiltinSamePackageMethodClashStaysUnresolved(t *testing.T) {
 	write(t, root, "p/types.go", "package p\ntype A struct{}\nfunc (A) Do() {}\ntype B struct{}\nfunc (B) Do() {}\n")
 	write(t, root, "p/use.go", "package p\nfunc Use(a A) { a.Do() }\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -151,14 +151,14 @@ type Provider interface {
 
 The server's `indexGraph` (`internal/server/graph_index.go`) ties them together:
 
-1. Return the in-memory cached `*Graph` for this root unless `refresh` is set.
+1. Return the bounded in-memory cached `*Graph` for this root unless `refresh` is set.
 2. Otherwise acquire a **per-root mutex** (so concurrent calls for the same repo don't
    double-index, while other repos proceed) and run `Builtin.IndexWithCache` against the
    on-disk per-file cache (see below).
 3. **If `Builtin` matched zero files**, fall back to `Null` so callers still get a
    definition list. The graph reports `provider: "null"` and explains the degradation in
    a `Note`.
-4. Cache the result in memory for the server's lifetime.
+4. Cache the result in memory with a 32-entry / 30-minute bound.
 
 ## Language gating
 
@@ -240,10 +240,10 @@ an identical graph. `Index` (no cache) remains for callers that don't want persi
    kept cross-directory pair.
 
 If there are no cross-package call edges, it returns empty and a `note` says so. Output is
-either a self-contained interactive **HTML** file (Mermaid 11 + svg-pan-zoom +
-click-to-detail, IDs/labels sanitized against SVG injection) or committable **Mermaid**
-`flowchart LR` source with a file-path legend. With `output_path`, the file is written and
-the content is also returned inline.
+either a self-contained interactive **HTML** file (inline SVG renderer, pan/zoom, and
+click-to-detail; no CDN dependency) or committable **Mermaid** `flowchart LR` source with
+a file-path legend. With `output_path`, the file is written inside the resolved repo root
+and the content is also returned inline.
 
 ## repo_map — ranking by centrality (PageRank)
 
@@ -321,8 +321,9 @@ exception, `routes`, noted below).
   classifying each definition as a column or a primary/foreign-key constraint → entities,
   relationships, and a Mermaid `erDiagram`.
 - **`routes`** — the one heuristic of the four: HTTP routing has no single grammar, so it
-  pattern-matches registration calls across frameworks. It favors recall and scans source
-  text (including comments), so it can over-match; the note says so.
+  pattern-matches registration calls across frameworks. It filters comments and ordinary
+  string-literal matches before regex matching, but still favors recall and can over-match
+  unusual dynamic routing; the note says so.
 - **`trace_flow` `format="mermaid"`** — renders a discovered trace as a `sequenceDiagram`
   (one message per in-trace edge, in breadth-first order — reach, not strict runtime order).
 

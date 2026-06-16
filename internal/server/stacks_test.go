@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/scan"
 )
 
 func writeStackFile(t *testing.T, root, rel, content string) {
@@ -84,7 +86,7 @@ terraform {
 
 func TestStacksTerragruntUnits(t *testing.T) {
 	root := terragruntFixture(t)
-	out, err := stacksExtract(stacksInput{Root: root})
+	out, err := stacksExtract(context.Background(), stacksInput{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +94,7 @@ func TestStacksTerragruntUnits(t *testing.T) {
 		t.Fatalf("total = %d, want 3 (got %+v)", out.Total, out.Stacks)
 	}
 
-	var app, vpc, standalone *stackUnit
+	var app, vpc, standalone *scan.StackUnit
 	for i := range out.Stacks {
 		switch out.Stacks[i].Path {
 		case "envs/prod/app":
@@ -116,12 +118,9 @@ func TestStacksTerragruntUnits(t *testing.T) {
 	if !slices.Contains(app.Dependencies, "envs/prod/vpc") {
 		t.Errorf("app dependencies = %v, want envs/prod/vpc", app.Dependencies)
 	}
-	// Backend comes from the included root.hcl; state key stays symbolic.
 	if app.Backend != "s3" || app.StateKey != "${local.rel_path}/terraform.tfstate" {
 		t.Errorf("app backend=%q key=%q", app.Backend, app.StateKey)
 	}
-	// Inputs are the union of the unit's and its includes' input names — names
-	// only, never values.
 	for _, want := range []string{"platform", "nodes", "environment"} {
 		if !slices.Contains(app.Inputs, want) {
 			t.Errorf("app inputs = %v, want %s", app.Inputs, want)
@@ -143,7 +142,7 @@ func TestStacksTerragruntUnits(t *testing.T) {
 func TestStacksEmptyRepoNote(t *testing.T) {
 	root := t.TempDir()
 	writeStackFile(t, root, "main.go", "package main\n")
-	out, err := stacksExtract(stacksInput{Root: root})
+	out, err := stacksExtract(context.Background(), stacksInput{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +154,7 @@ func TestStacksEmptyRepoNote(t *testing.T) {
 func TestStacksModulesOnlyNote(t *testing.T) {
 	root := t.TempDir()
 	writeStackFile(t, root, "modules/a/main.tf", `variable "x" { type = string }`)
-	out, err := stacksExtract(stacksInput{Root: root})
+	out, err := stacksExtract(context.Background(), stacksInput{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +201,7 @@ module "local_thing" {
 		t.Fatal(err)
 	}
 
-	byManifest := map[string]manifestDeps{}
+	byManifest := map[string]scan.ManifestDeps{}
 	for _, m := range out.Manifests {
 		byManifest[m.Manifest] = m
 	}
@@ -229,7 +228,6 @@ module "local_thing" {
 		t.Errorf("lock deps = %+v", lock.Direct)
 	}
 
-	// External module source surfaces; the local one does not.
 	main, ok := byManifest["main.tf"]
 	if !ok {
 		t.Fatalf("main.tf not parsed; manifests: %v", manifestNames(out))

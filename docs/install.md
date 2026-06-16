@@ -17,7 +17,8 @@ you never have to hand-edit a TOML table at midnight.
    pointing at the absolute binary path with `args: ["serve"]`.
 
 Both happen for every agent you target. The config registration reports back as
-`merged` (new JSON key), `appended` (new TOML table), or `already-present` (idempotent
+`merged` (new JSON key), `appended` (new TOML table), `refreshed` (existing onboard entry
+updated to the current binary path / owned fields), or `already-present` (idempotent
 re-run). To confirm any of this actually landed, `onboard doctor` reads it all back without
 touching a thing.
 
@@ -25,10 +26,15 @@ touching a thing.
 
 ```
 onboard serve                 run the MCP server over stdio (what agents launch)
-onboard serve --http :8080    run over Streamable HTTP at /mcp instead
+onboard serve --http 127.0.0.1:8080    run over Streamable HTTP at /mcp instead
+onboard serve --http 127.0.0.1:8080 --http-token TOKEN    require bearer auth for HTTP
 onboard install --agent NAME  install into one agent (claude|codex|grok|kimi|opencode|cursor|copilot|junie)
 onboard install --all         install into every detected agent
+onboard install --all --dry-run    preview config paths, skill paths, and planned actions
+onboard uninstall --agent NAME     remove onboard's MCP entry and embedded skill dirs
+onboard uninstall --all --dry-run  preview removals for every detected agent
 onboard init                  convenience wrapper: detect agents and install into each
+onboard init --dry-run        preview what init would install
 onboard doctor                verify each install; --agent NAME to check just one (read-only)
 onboard skills                list the embedded skills
 onboard -v                    print version (stamped commit + date when released)
@@ -45,6 +51,8 @@ onboard -v                    print version (stamped commit + date when released
   you don't use.
 - Plain `onboard install` with no flag is an error that asks you to pick `--agent` or
   `--all`.
+- `--dry-run` on `install`, `init`, or `uninstall` reports the config path, skills path,
+  and planned config action without writing files.
 
 After installing, **restart the agent** so it picks up the new MCP server and skills.
 
@@ -92,12 +100,15 @@ The installer is written to never damage a config it doesn't understand
 - **Merge, don't clobber.** JSON installs preserve every other key and only add the
   `onboard` server. TOML installs **append** a table rather than re-marshaling, so your
   comments and key ordering survive.
-- **Idempotent.** A second run detects the existing `onboard` entry and reports
-  `already-present` (the TOML check uses a regex that ignores commented-out tables and
-  matches both `[mcp_servers.onboard]` and the quoted-key form).
+- **Idempotent when current, refreshes when stale.** A second run reports
+  `already-present` when the existing `onboard` entry already points at the current
+  binary. If the command path moved, it rewrites only onboard-owned fields and reports
+  `refreshed` (the TOML check uses a regex that ignores commented-out tables and matches
+  both `[mcp_servers.onboard]` and the quoted-key form).
 - **Backup on unparseable config.** If a JSON config can't be parsed, it's moved to
   `<path>.onboard-bak` (with a unique suffix so a second run can't overwrite the first
-  backup) and a fresh object is written — the original is never silently lost.
+  backup) and a fresh object is written — the original is never silently lost. The CLI
+  prints the backup path in the install result when this happens.
 - **Permission-preserving.** Existing config file permissions are kept (agent configs
   often hold tokens at `0600`); new files default to `0600`, not world-readable.
 - **Path-escape guard.** Skill names containing `/`, `\`, or `..` are skipped so a name
@@ -111,6 +122,12 @@ The installer is written to never damage a config it doesn't understand
 
 You don't have to use the installer. To wire onboard into any MCP client by hand, register
 a stdio server that runs the absolute binary path with `serve` (e.g. for Claude Code, add
-`{"command": "/abs/path/onboard", "args": ["serve"]}` under `mcpServers.onboard`). For a
-hosted/shared deployment, run `onboard serve --http :8080` and point an HTTP MCP client at
-`http://host:8080/mcp`.
+`{"command": "/abs/path/onboard", "args": ["serve"]}` under `mcpServers.onboard`). For
+local HTTP, run `onboard serve --http 127.0.0.1:8080` and point an HTTP MCP client at
+`http://127.0.0.1:8080/mcp`. Set `--http-token TOKEN` or `ONBOARD_HTTP_TOKEN` to require
+`Authorization: Bearer TOKEN`; `--http-max-body-mb` defaults to 10. HTTP mode logs one
+structured line per MCP request to stderr and exposes basic Prometheus-style counters at
+`/metrics` (guarded by the same bearer token when configured). For hosted or shared
+deployment, also put onboard behind your own TLS and network controls; the MCP endpoint can
+read source code and write explicit output files when tools such as `render_map` are asked
+to. See [trust.md](trust.md).

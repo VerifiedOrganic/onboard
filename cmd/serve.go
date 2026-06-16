@@ -3,17 +3,23 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"log/slog"
 	"os"
-	"time"
+	"os/signal"
+	"syscall"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
 	"github.com/VerifiedOrganic/onboard/internal/server"
+	"github.com/VerifiedOrganic/onboard/internal/transport"
 )
 
-var serveHTTP string
+var (
+	serveHTTP          string
+	serveHTTPToken     string
+	serveHTTPMaxBodyMB int64
+)
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -22,31 +28,41 @@ var serveCmd = &cobra.Command{
 
 By default it speaks over stdin/stdout — this is what an agent launches. With
 --http it serves the same tools, resources, and prompts over Streamable HTTP at
-/mcp, for hosted or headless/CI use.`,
+/mcp, for local headless/CI use. For hosted/shared use, put it behind auth, TLS,
+and network controls. Set --http-token or ONBOARD_HTTP_TOKEN to require a bearer token.`,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		s := server.New(version)
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		var opts []server.Option
+		if serveHTTP != "" {
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("resolve working directory for http root policy: %w", err)
+			}
+			opts = append(opts, server.WithRootPolicy(transport.RootPolicyFromEnv(wd)))
+			opts = append(opts, server.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil))))
+		}
+		s := server.New(version, opts...)
 
 		if serveHTTP != "" {
-			handler := mcp.NewStreamableHTTPHandler(
-				func(*http.Request) *mcp.Server { return s },
-				nil, // default options: stateful sessions, localhost protection on
-			)
-			mux := http.NewServeMux()
-			mux.Handle("/mcp", handler)
-			fmt.Fprintf(os.Stderr, "onboard MCP server listening on http://%s/mcp\n", serveHTTP)
-			srv := &http.Server{
-				Addr:              serveHTTP,
-				Handler:           mux,
-				ReadHeaderTimeout: 5 * time.Second,
+			token := serveHTTPToken
+			if token == "" {
+				token = os.Getenv("ONBOARD_HTTP_TOKEN")
 			}
-			return srv.ListenAndServe()
+			return transport.ServeHTTP(ctx, s, transport.Config{
+				Addr:         serveHTTP,
+				Token:        token,
+				MaxBodyBytes: serveHTTPMaxBodyMB * 1024 * 1024,
+			})
 		}
 
-		return s.Run(context.Background(), &mcp.StdioTransport{})
+		return s.Run(ctx, &mcp.StdioTransport{})
 	},
 }
 
 func init() {
-	serveCmd.Flags().StringVar(&serveHTTP, "http", "", "serve over Streamable HTTP on this address (e.g. :8080) instead of stdio")
+	serveCmd.Flags().StringVar(&serveHTTP, "http", "", "serve over Streamable HTTP on this address (e.g. 127.0.0.1:8080) instead of stdio")
+	serveCmd.Flags().StringVar(&serveHTTPToken, "http-token", "", "require this bearer token for Streamable HTTP (or set ONBOARD_HTTP_TOKEN)")
+	serveCmd.Flags().Int64Var(&serveHTTPMaxBodyMB, "http-max-body-mb", 10, "maximum Streamable HTTP request body size in MiB")
 	rootCmd.AddCommand(serveCmd)
 }

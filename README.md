@@ -27,6 +27,7 @@ two components together in a way nobody intended.
 go build -o onboard .
 
 # 2. wire it into every agent you have installed
+./onboard init --dry-run
 ./onboard init
 
 # 3. confirm it actually took (reads your configs, changes nothing)
@@ -40,17 +41,22 @@ get a guided, stepped tour of whatever repo you're sitting in — you pick the d
 Use **`/onboard-skills`** or `onboard skills` when you want the catalog of shipped
 workflows.
 
+`init --dry-run` and `install --dry-run` preview config paths, skill paths, and planned
+actions without writing. `onboard uninstall --agent NAME` removes onboard's MCP entry and
+embedded skill dirs for rollback.
+
 Driving it from CI or your own harness instead of an interactive agent? Run it as a server
 and point an **MCP client** at it:
 
 ```sh
 ./onboard serve                 # MCP over stdio (what agents launch)
-./onboard serve --http :8080    # MCP over Streamable HTTP at /mcp
+./onboard serve --http 127.0.0.1:8080    # MCP over Streamable HTTP at /mcp
 ```
 
 These start the server — they don't print a walkthrough on their own. `onboard` is the
 *server*; something that speaks MCP (an agent, or your CI harness) is the client that calls
-its tools. There's no standalone `onboard analyze` CLI by design.
+its tools. There's no standalone `onboard analyze` CLI by design. Keep HTTP bound to
+loopback unless you put it behind your own auth, TLS, and network controls.
 
 New here? **[docs/getting-started.md](docs/getting-started.md)** is the unhurried version
 of the above, with what-you-should-see at each step.

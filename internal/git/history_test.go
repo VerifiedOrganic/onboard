@@ -1,6 +1,9 @@
 package git
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestHistoryAggregatesChurn(t *testing.T) {
 	repo := initRepo(t) // one commit touching a.txt
@@ -8,7 +11,7 @@ func TestHistoryAggregatesChurn(t *testing.T) {
 	commit(t, repo, "a.txt", "three\n", "edit a again")
 	commit(t, repo, "b.txt", "b\n", "add b")
 
-	stats, err := History(repo, 0)
+	stats, err := History(context.Background(), repo, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

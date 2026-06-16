@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	installAgent string
-	installAll   bool
+	installAgent  string
+	installAll    bool
+	installDryRun bool
 )
 
 var installCmd = &cobra.Command{
@@ -23,14 +24,15 @@ with a native skill system also installs the embedded skill files.
 Examples:
   onboard install --agent claude
   onboard install --agent codex
-  onboard install --all`,
+  onboard install --all
+  onboard install --all --dry-run`,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		bin, err := os.Executable()
 		if err != nil {
 			return err
 		}
 
-		targets, err := resolveTargets()
+		targets, err := resolveTargets(installAgent, installAll, "onboard install --help")
 		if err != nil {
 			return err
 		}
@@ -41,21 +43,53 @@ Examples:
 
 		failures := 0
 		for _, a := range targets {
-			res, err := agents.Install(a, bin)
+			var res agents.Result
+			if installDryRun {
+				res, err = agents.PreviewInstall(a, bin)
+			} else {
+				res, err = agents.Install(a, bin)
+			}
 			if err != nil {
 				fmt.Printf("  ✗ %-9s %v\n", a.Name, err)
 				failures++
 				continue
 			}
-			fmt.Printf("  ✓ %-9s config: %-15s skills: %d file(s)%s\n",
-				res.Agent, res.ConfigAction, res.SkillFiles, cleanupSuffix(res.SkillDirsCleaned))
+			printInstallResult(res, installDryRun)
 		}
-		fmt.Println("\nRestart your agent(s) to pick up the onboard MCP server.")
+		if installDryRun {
+			fmt.Println("\nDry run only; no files were changed.")
+		} else {
+			fmt.Println("\nRestart your agent(s) to pick up the onboard MCP server.")
+		}
 		if failures > 0 {
 			return fmt.Errorf("%d install(s) failed", failures)
 		}
 		return nil
 	},
+}
+
+func printInstallResult(res agents.Result, dryRun bool) {
+	action := res.ConfigAction
+	if dryRun {
+		action = dryRunAction(action)
+	}
+	fmt.Printf("  ✓ %-9s config: %-18s skills: %d file(s)%s%s%s\n",
+		res.Agent, action, res.SkillFiles, cleanupSuffix(res.SkillDirsCleaned), backupSuffix(res.BackupPath), pathSuffix(res))
+}
+
+func dryRunAction(action string) string {
+	switch action {
+	case "merged":
+		return "would-merge"
+	case "appended":
+		return "would-append"
+	case "refreshed":
+		return "would-refresh"
+	case "removed":
+		return "would-remove"
+	default:
+		return "would-" + action
+	}
 }
 
 func cleanupSuffix(n int) string {
@@ -68,11 +102,25 @@ func cleanupSuffix(n int) string {
 	return fmt.Sprintf(" (cleaned %d legacy dirs)", n)
 }
 
-func resolveTargets() ([]agents.Agent, error) {
-	if installAll && installAgent != "" {
-		return nil, fmt.Errorf("use either --agent <name> or --all, not both")
+func backupSuffix(path string) string {
+	if path == "" {
+		return ""
 	}
-	if installAll {
+	return " backup: " + path
+}
+
+func pathSuffix(res agents.Result) string {
+	if res.ConfigPath == "" && res.SkillsDir == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (config: %s, skills: %s)", res.ConfigPath, res.SkillsDir)
+}
+
+func resolveTargets(agent string, allFlag bool, helpCmd string) ([]agents.Agent, error) {
+	if allFlag && agent != "" {
+		return nil, fmt.Errorf("use either --agent <name> or --all, not both (run %q)", helpCmd)
+	}
+	if allFlag {
 		all, err := agents.Registry()
 		if err != nil {
 			return nil, err
@@ -85,18 +133,19 @@ func resolveTargets() ([]agents.Agent, error) {
 		}
 		return detected, nil
 	}
-	if installAgent != "" {
-		a, err := agents.Find(installAgent)
+	if agent != "" {
+		a, err := agents.Find(agent)
 		if err != nil {
 			return nil, err
 		}
 		return []agents.Agent{a}, nil
 	}
-	return nil, fmt.Errorf("specify --agent <name> or --all")
+	return nil, fmt.Errorf("specify --agent <name> or --all (run %q)", helpCmd)
 }
 
 func init() {
 	installCmd.Flags().StringVar(&installAgent, "agent", "", "agent to install into (claude|grok|codex|kimi|opencode|cursor|copilot|junie)")
 	installCmd.Flags().BoolVar(&installAll, "all", false, "install into all detected agents")
+	installCmd.Flags().BoolVar(&installDryRun, "dry-run", false, "show planned config and skill changes without writing files")
 	rootCmd.AddCommand(installCmd)
 }

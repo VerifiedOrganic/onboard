@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/scan"
 )
 
 func writeFixtureFile(t *testing.T, root, rel, content string) {
@@ -286,7 +288,7 @@ func TestIntegrationHardeningMonorepoWorkspaces(t *testing.T) {
 	var depsOut depsOutput
 	callStructured(ctx, t, cs, "deps", map[string]any{"root": root}, &depsOut)
 
-	var webManifest *manifestDeps
+	var webManifest *scan.ManifestDeps
 	for i := range depsOut.Manifests {
 		if depsOut.Manifests[i].Module == "@mono/web" {
 			webManifest = &depsOut.Manifests[i]

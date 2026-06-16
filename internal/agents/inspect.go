@@ -84,11 +84,11 @@ func Inspect(a Agent) Health {
 // config is absent, unparseable, or has no onboard entry.
 func configuredBin(a Agent) (string, bool) {
 	switch a.Shape {
-	case ShapeJSONMcpServers, ShapeJSONMcpServersWithTools:
+	case ShapeJSONMCPServers, ShapeJSONMCPServersWithTools:
 		return jsonServerCommand(a.ConfigPath, "mcpServers")
 	case ShapeJSONOpencode:
 		return jsonServerCommand(a.ConfigPath, "mcp")
-	case ShapeTOMLMcpServers:
+	case ShapeTOMLMCPServers:
 		return tomlOnboardCommand(a.ConfigPath)
 	}
 	return "", false
@@ -161,5 +161,5 @@ func tomlOnboardCommand(path string) (string, bool) {
 
 var (
 	tomlNextTableHeader = regexp.MustCompile(`(?m)^[ \t]*\[`)
-	tomlCommandValue    = regexp.MustCompile(`command\s*=\s*("(?:[^"\\]|\\.)*")`)
+	tomlCommandValue    = regexp.MustCompile(`(?m)^[ \t]*command[ \t]*=\s*("(?:[^"\\]|\\.)*")`)
 )

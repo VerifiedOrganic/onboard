@@ -5,6 +5,7 @@
 package guide
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,16 +35,16 @@ type Guide struct {
 
 // Path returns where the guide is stored: inside the git common dir when root is a
 // git work tree (so it is never accidentally committed), else under <root>/.onboard.
-func Path(root string) string {
-	if dir, err := git.CommonDir(root); err == nil {
+func Path(ctx context.Context, root string) string {
+	if dir, err := git.CommonDir(ctx, root); err == nil {
 		return filepath.Join(dir, fileName)
 	}
 	return filepath.Join(root, ".onboard", fileName)
 }
 
 // Read loads the guide cache for root. A missing file is not an error (Exists=false).
-func Read(root string) (Guide, error) {
-	p := Path(root)
+func Read(ctx context.Context, root string) (Guide, error) {
+	p := Path(ctx, root)
 	g := Guide{Path: p}
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -59,21 +60,44 @@ func Read(root string) (Guide, error) {
 
 // Write stamps a header (sha=HEAD, branch, generated=now, mode) and writes the body.
 // now is injected so callers/tests control the timestamp.
-func Write(root, body, mode string, now time.Time) (string, error) {
+func Write(ctx context.Context, root, body, mode string, now time.Time) (string, error) {
 	if mode != "full" && mode != "delta" {
 		return "", fmt.Errorf("unsupported guide mode %q", mode)
 	}
-	p := Path(root)
+	p := Path(ctx, root)
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return "", err
 	}
 	h := Header{Mode: mode, Generated: now.UTC().Format(time.RFC3339)}
-	h.SHA, _ = git.HeadSHA(root) // empty if not a git repo; that's fine
-	h.Branch, _ = git.Branch(root)
+	h.SHA, _ = git.HeadSHA(ctx, root) // empty if not a git repo; that's fine
+	h.Branch, _ = git.Branch(ctx, root)
 	content := format(h) + "\n\n" + strings.TrimLeft(body, "\n")
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(p), fileName+".*.tmp")
+	if err != nil {
 		return "", err
 	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmpPath, p); err != nil {
+		return "", err
+	}
+	cleanup = false
 	return p, nil
 }
 

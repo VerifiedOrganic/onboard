@@ -1,12 +1,15 @@
-package providers
+package providers_test
 
 import (
 	"context"
 	"slices"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/indexer"
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
-func qnameByDisplay(t *testing.T, g *Graph, display string) string {
+func qnameByDisplay(t *testing.T, g *providers.Graph, display string) string {
 	t.Helper()
 	for _, s := range g.Defs {
 		if s.Display() == display {
@@ -37,7 +40,7 @@ impl Svc {
 fn other_fn(x: i32) -> i32 { x + 1 }
 `)
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +81,7 @@ impl MyService {
 }
 `)
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +122,7 @@ impl Impl {
 }
 `)
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +135,7 @@ impl Impl {
 		t.Fatal("handle not found")
 	}
 
-	var traitImpl *Symbol
+	var traitImpl *providers.Symbol
 	for _, s := range handles {
 		if s.Recv != "" && s.Recv != "Handler" {
 			traitImpl = s
@@ -161,7 +164,7 @@ fn hello() {
 }
 `)
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +210,7 @@ pub fn public_entry() -> usize {
 }
 `)
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +250,7 @@ func TestRustScopedModuleCallFallsBackToFunction(t *testing.T) {
 	write(t, root, "crates/core/src/lib.rs", "pub fn public_entry() -> usize { 1 }\n")
 	write(t, root, "crates/cli/src/main.rs", "fn main() { corelib::public_entry(); }\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +275,7 @@ impl Engine {
 }
 `)
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,10 +12,10 @@ import (
 
 // connect wires a client to a fresh server over the in-memory transport (server
 // first, then client) and returns the client session.
-func connect(t *testing.T) (*mcp.ClientSession, context.Context) {
+func connect(t *testing.T, opts ...Option) (*mcp.ClientSession, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	srv := New("test")
+	srv := New("test", opts...)
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0"}, nil)
 
 	st, ct := mcp.NewInMemoryTransports()

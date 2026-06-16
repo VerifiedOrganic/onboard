@@ -8,23 +8,26 @@ import (
 	"strconv"
 )
 
-// cacheVersion is bumped whenever the on-disk format or the tagging/resolution logic
+// CacheVersion is bumped whenever the on-disk format or the tagging/resolution logic
 // changes in a way that would make a stored index stale. A mismatch forces a rebuild.
-const cacheVersion = 6
+const CacheVersion = 6
 
-type resolvedImport struct {
-	targetFile string
-	targetName string
+const cacheVersion = CacheVersion
+
+// ResolvedImport maps an import alias to a target file and exported name.
+type ResolvedImport struct {
+	TargetFile string
+	TargetName string
 }
 
-type diskImport struct {
+// DiskImport is the persisted form of a resolved import alias.
+type DiskImport struct {
 	TargetFile string `json:"tf"`
 	TargetName string `json:"tn"`
 }
 
-// diskRef/diskFile/diskIndex are the persisted form of the per-file tag data. The types
-// are unexported (not API surface); encoding/json serializes their exported fields.
-type diskRef struct {
+// DiskRef is the persisted form of a raw call reference.
+type DiskRef struct {
 	Caller string `json:"c"`
 	File   string `json:"f"`
 	Callee string `json:"n"`
@@ -32,106 +35,127 @@ type diskRef struct {
 	Bare   bool   `json:"bare,omitempty"`
 }
 
-type diskFile struct {
+// DiskFile is the persisted per-file tag payload.
+type DiskFile struct {
 	Hash    string                `json:"h"`
 	Lang    string                `json:"l"`
 	Defs    []*Symbol             `json:"d"`
-	Refs    []diskRef             `json:"r"`
-	Imports map[string]diskImport `json:"i,omitempty"`
+	Refs    []DiskRef             `json:"r"`
+	Imports map[string]DiskImport `json:"i,omitempty"`
 }
 
-type diskIndex struct {
+// DiskIndex is the on-disk incremental index for a repository.
+type DiskIndex struct {
 	Version int                 `json:"v"`
-	Files   map[string]diskFile `json:"files"`
+	Files   map[string]DiskFile `json:"files"`
 }
 
-// fileData is the in-memory per-file tag result (from a fresh tag or the cache).
-type fileData struct {
-	lang    string
-	defs    []*Symbol
-	refs    []rawRef
-	imports map[string]resolvedImport
+// FileData is the in-memory per-file tag result (from a fresh tag or the cache).
+type FileData struct {
+	Lang    string
+	Defs    []*Symbol
+	Refs    []RawRef
+	Imports map[string]ResolvedImport
 }
 
-// hashBytes is a fast non-cryptographic content fingerprint; collisions are
-// astronomically unlikely for change detection and the cost is far below parsing.
+// HashBytes is a fast non-cryptographic content fingerprint.
+func HashBytes(b []byte) string {
+	return hashBytes(b)
+}
+
 func hashBytes(b []byte) string {
 	h := fnv.New64a()
 	_, _ = h.Write(b)
 	return strconv.FormatUint(h.Sum64(), 16)
 }
 
-func toDiskRefs(refs []rawRef) []diskRef {
+// ToDiskRefs converts in-memory refs to the disk representation.
+func ToDiskRefs(refs []RawRef) []DiskRef {
+	return toDiskRefs(refs)
+}
+
+func toDiskRefs(refs []RawRef) []DiskRef {
 	if len(refs) == 0 {
 		return nil
 	}
-	out := make([]diskRef, len(refs))
+	out := make([]DiskRef, len(refs))
 	for i, r := range refs {
-		out[i] = diskRef{
-			Caller: r.callerQName,
-			File:   r.callerFile,
-			Callee: r.calleeName,
-			Recv:   r.calleeRecv,
-			Bare:   r.allowBare,
+		out[i] = DiskRef{
+			Caller: r.CallerQName,
+			File:   r.CallerFile,
+			Callee: r.CalleeName,
+			Recv:   r.CalleeRecv,
+			Bare:   r.AllowBare,
 		}
 	}
 	return out
 }
 
-func fromDiskRefs(refs []diskRef) []rawRef {
+// FromDiskRefs converts disk refs to in-memory refs.
+func FromDiskRefs(refs []DiskRef) []RawRef {
+	return fromDiskRefs(refs)
+}
+
+func fromDiskRefs(refs []DiskRef) []RawRef {
 	if len(refs) == 0 {
 		return nil
 	}
-	out := make([]rawRef, len(refs))
+	out := make([]RawRef, len(refs))
 	for i, r := range refs {
-		out[i] = rawRef{
-			callerQName: r.Caller,
-			callerFile:  r.File,
-			calleeName:  r.Callee,
-			calleeRecv:  r.Recv,
-			allowBare:   r.Bare,
+		out[i] = RawRef{
+			CallerQName: r.Caller,
+			CallerFile:  r.File,
+			CalleeName:  r.Callee,
+			CalleeRecv:  r.Recv,
+			AllowBare:   r.Bare,
 		}
 	}
 	return out
 }
 
-func toDiskImports(imports map[string]resolvedImport) map[string]diskImport {
+// ToDiskImports converts in-memory imports to the disk representation.
+func ToDiskImports(imports map[string]ResolvedImport) map[string]DiskImport {
+	return toDiskImports(imports)
+}
+
+func toDiskImports(imports map[string]ResolvedImport) map[string]DiskImport {
 	if len(imports) == 0 {
 		return nil
 	}
-	out := make(map[string]diskImport, len(imports))
+	out := make(map[string]DiskImport, len(imports))
 	for k, v := range imports {
-		out[k] = diskImport{
-			TargetFile: v.targetFile,
-			TargetName: v.targetName,
-		}
+		out[k] = DiskImport{TargetFile: v.TargetFile, TargetName: v.TargetName} //nolint:staticcheck // disk JSON tags differ
 	}
 	return out
 }
 
-func fromDiskImports(imports map[string]diskImport) map[string]resolvedImport {
+// FromDiskImports converts disk imports to in-memory imports.
+func FromDiskImports(imports map[string]DiskImport) map[string]ResolvedImport {
+	return fromDiskImports(imports)
+}
+
+func fromDiskImports(imports map[string]DiskImport) map[string]ResolvedImport {
 	if len(imports) == 0 {
 		return nil
 	}
-	out := make(map[string]resolvedImport, len(imports))
+	out := make(map[string]ResolvedImport, len(imports))
 	for k, v := range imports {
-		out[k] = resolvedImport{
-			targetFile: v.TargetFile,
-			targetName: v.TargetName,
-		}
+		out[k] = ResolvedImport{TargetFile: v.TargetFile, TargetName: v.TargetName} //nolint:staticcheck // disk JSON tags differ
 	}
 	return out
 }
 
-// loadDiskIndex reads a persisted index, returning nil on any problem (missing,
-// unreadable, malformed, or stale version) so the caller falls back to a full rebuild
-// rather than trusting corrupt or outdated data.
-func loadDiskIndex(path string) *diskIndex {
+// LoadDiskIndex reads a persisted index, returning nil on any problem.
+func LoadDiskIndex(path string) *DiskIndex {
+	return loadDiskIndex(path)
+}
+
+func loadDiskIndex(path string) *DiskIndex {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	var di diskIndex
+	var di DiskIndex
 	if err := json.Unmarshal(data, &di); err != nil {
 		return nil
 	}
@@ -141,9 +165,12 @@ func loadDiskIndex(path string) *diskIndex {
 	return &di
 }
 
-// saveDiskIndex writes the index atomically (temp file + rename). Every failure is
-// swallowed: the cache is an optimization, never a correctness dependency.
-func saveDiskIndex(path string, di *diskIndex) {
+// SaveDiskIndex writes the index atomically (temp file + rename).
+func SaveDiskIndex(path string, di *DiskIndex) {
+	saveDiskIndex(path, di)
+}
+
+func saveDiskIndex(path string, di *DiskIndex) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return
 	}
@@ -152,8 +179,10 @@ func saveDiskIndex(path string, di *diskIndex) {
 		return
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return
 	}
-	_ = os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+	}
 }

@@ -1,4 +1,4 @@
-package providers
+package providers_test
 
 import (
 	"context"
@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/indexer"
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
 func write(t *testing.T, root, rel, content string) {
@@ -30,7 +33,7 @@ func mustUint32Offset(t *testing.T, label string, offset int) uint32 {
 }
 
 // qnameOf returns the single QName whose Name == name, failing if not exactly one.
-func qnameOf(t *testing.T, g *Graph, name string) string {
+func qnameOf(t *testing.T, g *providers.Graph, name string) string {
 	t.Helper()
 	syms := g.FindSymbols(name)
 	if len(syms) == 0 {
@@ -39,7 +42,7 @@ func qnameOf(t *testing.T, g *Graph, name string) string {
 	return syms[0].QName
 }
 
-func defNames(g *Graph) []string {
+func defNames(g *providers.Graph) []string {
 	var out []string
 	for _, s := range g.Defs {
 		out = append(out, s.QName)
@@ -52,7 +55,7 @@ func TestBuiltinGoCallGraph(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "x.go", "package x\n\nfunc helper() int { return 1 }\n\nfunc Run() int { return helper() }\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +77,7 @@ func TestBuiltinPythonCallGraph(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "m.py", "def helper():\n    return 1\n\ndef run():\n    return helper()\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +97,7 @@ func TestBuiltinSkipsVendorAndUnknown(t *testing.T) {
 	write(t, root, "node_modules/dep.go", "package dep\nfunc Dep() {}\n")
 	write(t, root, "readme.unknownext", "not code\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,12 +108,29 @@ func TestBuiltinSkipsVendorAndUnknown(t *testing.T) {
 	}
 }
 
+func TestBuiltinSkipsVeryLargeFiles(t *testing.T) {
+	root := t.TempDir()
+	const maxIndexedFileBytes = 4 << 20
+	write(t, root, "large.go", "package large\n"+strings.Repeat("// padding\n", (maxIndexedFileBytes/len("// padding\n"))+1))
+
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Files != 0 {
+		t.Fatalf("large file should be skipped, indexed files = %d", g.Files)
+	}
+	if !strings.Contains(g.Note, "large.go") {
+		t.Fatalf("skip note = %q, want large.go", g.Note)
+	}
+}
+
 func TestProvidersRejectMissingRoot(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
-	if _, err := (Builtin{}).Index(context.Background(), missing); err == nil {
+	if _, err := (indexer.Builtin{}).Index(context.Background(), missing); err == nil {
 		t.Fatal("builtin provider should reject a missing root")
 	}
-	if _, err := (Null{}).Index(context.Background(), missing); err == nil {
+	if _, err := (indexer.Null{}).Index(context.Background(), missing); err == nil {
 		t.Fatal("null provider should reject a missing root")
 	}
 }
@@ -119,7 +139,7 @@ func TestNullProviderDefinitionsOnly(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "x.go", "package x\nfunc Alpha() {}\nfunc Beta() {}\n")
 
-	g, err := Null{}.Index(context.Background(), root)
+	g, err := indexer.Null{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +155,7 @@ func TestNullProviderKeepsDuplicateNames(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "x.go", "package x\nfunc Same() {}\nfunc Same() {}\n")
 
-	g, err := Null{}.Index(context.Background(), root)
+	g, err := indexer.Null{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,12 +181,12 @@ func TestBuiltinCapturesMethodReceiver(t *testing.T) {
 		"func (Tree[K]) Walk() {}\n"+
 		"func Plain() {}\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	bySymbol := map[string]*Symbol{}
+	bySymbol := map[string]*providers.Symbol{}
 	for _, s := range g.Defs {
 		bySymbol[s.Name] = s
 	}
@@ -197,13 +217,13 @@ func TestRustOwnerHelpers(t *testing.T) {
 	parseDecl := mustUint32Offset(t, "fn parse", strings.LastIndex(text, "fn parse"))
 	parseStart := mustUint32Offset(t, "parse", strings.LastIndex(text, "parse"))
 
-	if got := rustOwner(src, newStart); got != "Engine" {
+	if got := providers.RustOwner(src, newStart); got != "Engine" {
 		t.Errorf("owner(new) = %q, want Engine", got)
 	}
-	if got := rustOwner(src, parseStart); got != "Engine as Parser" {
+	if got := providers.RustOwner(src, parseStart); got != "Engine as Parser" {
 		t.Errorf("owner(parse) = %q, want Engine as Parser", got)
 	}
-	if !rustDefinitionIsTest(src, parseDecl) {
+	if !providers.RustDefinitionIsTest(src, parseDecl) {
 		t.Error("parse should be marked as a Rust test from its attribute")
 	}
 }
@@ -220,7 +240,7 @@ func TestBuiltinRustDisplayAndInlineTest(t *testing.T) {
 		"}\n"+
 		"trait Parser { fn parse(&self); }\n")
 
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,14 +264,14 @@ func TestBuiltinRustDisplayAndInlineTest(t *testing.T) {
 	}
 }
 
-func recvOf(s *Symbol) string {
+func recvOf(s *providers.Symbol) string {
 	if s == nil {
 		return "<nil>"
 	}
 	return s.Recv
 }
 
-func displayOf(s *Symbol) string {
+func displayOf(s *providers.Symbol) string {
 	if s == nil {
 		return "<nil>"
 	}

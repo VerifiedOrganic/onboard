@@ -2,38 +2,11 @@ package server
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"time"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/VerifiedOrganic/onboard/internal/git"
-	"github.com/VerifiedOrganic/onboard/internal/guide"
 )
-
-func resolveRoot(root string) (string, error) {
-	if root == "" {
-		var err error
-		root, err = os.Getwd()
-		if err != nil {
-			return "", err
-		}
-	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("root %q is not a directory", abs)
-	}
-	return abs, nil
-}
 
 // --- guide_read ---
 
@@ -82,16 +55,17 @@ type guideDeltaOutput struct {
 	Note      string       `json:"note,omitempty"`
 }
 
-func registerGuideTools(s *mcp.Server) {
+func registerGuideTools(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "guide_read",
 		Description: "Read the cached codebase guide and report whether it is current with HEAD. Call before regenerating: if current, reuse the body instead of rescanning.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in guideReadInput) (*mcp.CallToolResult, guideReadOutput, error) {
-		root, err := resolveRoot(in.Root)
+	}, withToolLog(rt, "guide_read", func(ctx context.Context, _ *mcp.CallToolRequest, in guideReadInput) (*mcp.CallToolResult, guideReadOutput, error) {
+		root, err := resolveRoot(ctx, in.Root)
 		if err != nil {
 			return nil, guideReadOutput{}, err
 		}
-		g, err := guide.Read(root)
+		deps := depsForContext(ctx)
+		g, err := deps.Guide.Read(ctx, root)
 		if err != nil {
 			return nil, guideReadOutput{}, err
 		}
@@ -100,54 +74,56 @@ func registerGuideTools(s *mcp.Server) {
 			Branch: g.Header.Branch, Mode: g.Header.Mode,
 			Generated: g.Header.Generated, Body: g.Body,
 		}
-		if git.Available(root) {
-			out.HeadSHA, _ = git.HeadSHA(root)
+		if deps.Git.Available(ctx, root) {
+			out.HeadSHA, _ = deps.Git.HeadSHA(ctx, root)
 			out.Current = g.Exists && out.CachedSHA != "" && out.CachedSHA == out.HeadSHA
 		} else {
 			out.Note = "Not a git repository — delta updates and currency checks are unavailable."
 		}
 		return nil, out, nil
-	})
+	}))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "guide_write",
 		Description: "Write (or overwrite) the durable codebase guide. A machine-readable cache header (HEAD sha, branch, timestamp, mode) is prepended automatically. The guide lives inside .git so it is not committed.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in guideWriteInput) (*mcp.CallToolResult, guideWriteOutput, error) {
-		root, err := resolveRoot(in.Root)
+	}, withToolLog(rt, "guide_write", func(ctx context.Context, _ *mcp.CallToolRequest, in guideWriteInput) (*mcp.CallToolResult, guideWriteOutput, error) {
+		root, err := resolveRoot(ctx, in.Root)
 		if err != nil {
 			return nil, guideWriteOutput{}, err
 		}
+		deps := depsForContext(ctx)
 		mode := in.Mode
 		if mode == "" {
 			mode = "full"
 		}
-		path, err := guide.Write(root, in.Body, mode, time.Now())
+		path, err := deps.Guide.Write(ctx, root, in.Body, mode)
 		if err != nil {
 			return nil, guideWriteOutput{}, err
 		}
 		out := guideWriteOutput{Path: path}
-		out.SHA, _ = git.HeadSHA(root)
+		out.SHA, _ = deps.Git.HeadSHA(ctx, root)
 		if out.SHA == "" {
 			out.Note = "Not a git repository — guide written but not SHA-tagged; delta updates unavailable."
 		}
 		return nil, out, nil
-	})
+	}))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "guide_delta",
-		Description: "Compute what changed since the cached guide's SHA: returns the cached vs HEAD SHA and the list of added/modified/deleted files, so an update can touch only affected sections.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in guideDeltaInput) (*mcp.CallToolResult, guideDeltaOutput, error) {
-		root, err := resolveRoot(in.Root)
+		Description: "Compute what changed since the cached guide's SHA: returns the cached vs HEAD SHA and the list of added/modified/deleted/renamed files, including old_path for renames, so an update can touch only affected sections.",
+	}, withToolLog(rt, "guide_delta", func(ctx context.Context, _ *mcp.CallToolRequest, in guideDeltaInput) (*mcp.CallToolResult, guideDeltaOutput, error) {
+		root, err := resolveRoot(ctx, in.Root)
 		if err != nil {
 			return nil, guideDeltaOutput{}, err
 		}
+		deps := depsForContext(ctx)
 		out := guideDeltaOutput{}
-		if !git.Available(root) {
+		if !deps.Git.Available(ctx, root) {
 			out.Note = "Not a git repository — cannot compute a delta; regenerate the guide in full."
 			return nil, out, nil
 		}
-		out.HeadSHA, _ = git.HeadSHA(root)
-		g, err := guide.Read(root)
+		out.HeadSHA, _ = deps.Git.HeadSHA(ctx, root)
+		g, err := deps.Guide.Read(ctx, root)
 		if err != nil {
 			return nil, out, err
 		}
@@ -161,11 +137,11 @@ func registerGuideTools(s *mcp.Server) {
 			out.Note = "Guide is already current with HEAD; no update needed."
 			return nil, out, nil
 		}
-		changed, err := git.DiffNameStatus(root, out.CachedSHA)
+		changed, err := deps.Git.DiffNameStatus(ctx, root, out.CachedSHA)
 		if err != nil {
 			return nil, out, err
 		}
 		out.Changed = changed
 		return nil, out, nil
-	})
+	}))
 }

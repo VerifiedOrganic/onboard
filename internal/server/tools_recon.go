@@ -1,18 +1,19 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/VerifiedOrganic/onboard/internal/git"
-	"github.com/VerifiedOrganic/onboard/internal/ignore"
+	"github.com/VerifiedOrganic/onboard/internal/scan"
 )
 
 // reconHotspotCommits bounds the history recon scans for its quick hotspot summary; the
@@ -67,18 +68,19 @@ var iacManifests = map[string]string{
 	".opentofu.lock.hcl":  "OpenTofu (HCL)",
 }
 
-func registerReconTool(s *mcp.Server) {
+func registerReconTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "recon",
 		Description: "Phase-1 reconnaissance: detect stack, frameworks, entry points, test layout, tooling, a pruned directory tree, and (in a git repo) the highest-churn hotspot files for a repository. A fast structural scan — reads no source beyond manifest filenames.",
-	}, recon)
+	}, withToolLog(rt, "recon", recon))
 }
 
 func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.CallToolResult, reconOutput, error) {
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return nil, reconOutput{}, err
 	}
+	deps := depsForContext(ctx)
 	out := reconOutput{Root: root}
 
 	stackSet := map[string]bool{}
@@ -91,7 +93,7 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if p != root && shouldSkipDir(name) {
+			if p != root && scan.ShouldSkipDir(name) {
 				return fs.SkipDir
 			}
 			return nil
@@ -207,7 +209,7 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 		out.Tooling = addUnique(out.Tooling, "GitHub Actions")
 	}
 	if stackSet["Rust"] {
-		if cargo, ok := loadCargoMetadata(ctx, root); ok {
+		if cargo, ok := scan.LoadCargoMetadata(ctx, root); ok {
 			out.RustTargets = cargoTargetSummaries(cargo)
 			for _, md := range cargo {
 				for _, target := range md.Targets {
@@ -225,19 +227,19 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 	out.Stack = keys(stackSet)
 	out.Frameworks = keys(fwSet)
 	out.DirTree = dirTree(root, 2)
-	sort.Strings(out.Manifests)
-	sort.Strings(out.EntryPoints)
-	sort.Strings(out.TestLayout)
-	sort.Strings(out.Tooling)
-	sort.Strings(out.RustTargets)
-	sort.Strings(out.RiskHints)
+	slices.Sort(out.Manifests)
+	slices.Sort(out.EntryPoints)
+	slices.Sort(out.TestLayout)
+	slices.Sort(out.Tooling)
+	slices.Sort(out.RustTargets)
+	slices.Sort(out.RiskHints)
 	out.EntryPoints = dedupeStrings(out.EntryPoints)
 
 	// Git churn hotspots: the files that change most are where understanding and risk
 	// concentrate, so point an onboarding reader at them first. Degrades silently outside
 	// a git work tree — the dedicated history tool gives the full view.
-	if git.Available(root) {
-		if hist, herr := git.History(root, reconHotspotCommits); herr == nil {
+	if deps.Git.Available(ctx, root) {
+		if hist, herr := deps.Git.History(ctx, root, reconHotspotCommits); herr == nil {
 			out.Hotspots = topHotspots(hist, 8)
 		}
 	}
@@ -268,11 +270,11 @@ func topExtensions(extCount map[string]int, n int) string {
 	for e, c := range extCount {
 		ranked = append(ranked, ec{e, c})
 	}
-	sort.Slice(ranked, func(i, j int) bool {
-		if ranked[i].count != ranked[j].count {
-			return ranked[i].count > ranked[j].count
+	slices.SortFunc(ranked, func(a, b ec) int {
+		if c := cmp.Compare(b.count, a.count); c != 0 {
+			return c
 		}
-		return ranked[i].ext < ranked[j].ext
+		return cmp.Compare(a.ext, b.ext)
 	})
 	if len(ranked) > n {
 		ranked = ranked[:n]
@@ -291,7 +293,7 @@ func dedupeStrings(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
-	sort.Strings(in)
+	slices.Sort(in)
 	out := in[:0]
 	var prev string
 	for i, v := range in {
@@ -317,26 +319,35 @@ func topHotspots(hist []git.FileStat, n int) []string {
 	return out
 }
 
-// shouldSkipDir prunes the shared dependency/build directories plus dotdirs, but keeps
-// .github (recon detects CI workflows there).
-func shouldSkipDir(name string) bool {
-	if ignore.Dir(name) {
-		return true
+func cargoTargetSummaries(metadata map[string]scan.ManifestDeps) []string {
+	var out []string
+	for _, md := range metadata {
+		for _, target := range md.Targets {
+			kind := strings.Join(target.Kind, ",")
+			if kind == "" {
+				kind = "target"
+			}
+			out = append(out, md.Module+":"+target.Name+" ("+kind+") "+target.SrcPath)
+		}
 	}
-	return strings.HasPrefix(name, ".") && name != ".github"
+	slices.Sort(out)
+	return out
 }
 
 func dirTree(root string, maxDepth int) []string {
 	var out []string
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || !d.IsDir() {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
 		if rel == "." {
 			return nil
 		}
-		if shouldSkipDir(d.Name()) {
+		if scan.ShouldSkipDir(d.Name()) {
 			return fs.SkipDir
 		}
 		if len(strings.Split(rel, string(filepath.Separator))) > maxDepth {
@@ -345,7 +356,7 @@ func dirTree(root string, maxDepth int) []string {
 		out = append(out, rel+"/")
 		return nil
 	})
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -363,6 +374,6 @@ func keys(m map[string]bool) []string {
 	for k := range m {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }

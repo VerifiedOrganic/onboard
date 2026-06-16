@@ -1,10 +1,12 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"math"
+	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -62,25 +64,30 @@ var reviewableKinds = map[string]bool{
 
 func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, error) {
 	out := explainDiffOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
-	if !git.Available(root) {
+	deps := depsForContext(ctx)
+	if !deps.Git.Available(ctx, root) {
 		out.Note = "Not a git repository — nothing to diff."
 		return out, nil
 	}
 
 	base := in.Base
 	if base == "" {
-		if base = git.DefaultBase(root); base == "" {
+		if base = deps.Git.DefaultBase(ctx, root); base == "" {
 			out.Note = "Could not detect a base branch (origin/main, main, master). Pass `base` (a branch, tag, or SHA) explicitly."
 			return out, nil
 		}
 	}
 	out.Base = base
+	if err := deps.Git.ValidateRef(ctx, root, base); err != nil {
+		out.Note = err.Error()
+		return out, nil
+	}
 
-	diffs, err := git.Diff(root, base)
+	diffs, err := deps.Git.Diff(ctx, root, base)
 	if err != nil {
 		return out, err
 	}
@@ -97,52 +104,72 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 		return out, err
 	}
 	out.Provider = g.Provider
+	deletions := false
+	for _, d := range diffs {
+		if d.Status == "D" {
+			deletions = true
+			break
+		}
+	}
+	var baseGraph *providers.Graph
+	if deletions {
+		baseGraph, err = diffBaseGraph(ctx, root, base, in.Precise)
+		if err != nil {
+			return out, err
+		}
+	}
 
 	// Group definitions by file, sorted by line, so each symbol's body extent can be
 	// approximated as [line, nextSymbolLine) for attributing changed lines.
 	defsByFile := map[string][]*providers.Symbol{}
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		f := filepath.ToSlash(s.File)
 		defsByFile[f] = append(defsByFile[f], s)
 	}
 	for _, defs := range defsByFile {
-		sort.Slice(defs, func(i, j int) bool { return defs[i].Line < defs[j].Line })
+		slices.SortFunc(defs, func(a, b *providers.Symbol) int {
+			return cmp.Compare(a.Line, b.Line)
+		})
 	}
 
 	impactedUnion := map[string]bool{}
 	atRiskTests := map[string]bool{}
 	for _, d := range diffs {
-		if d.Status == "D" || len(d.Hunks) == 0 {
-			continue // deletions have no current symbols to attribute to
+		if d.Status == "D" {
+			if baseGraph == nil {
+				continue
+			}
+			for _, sym := range deletedFileSymbols(baseGraph, d.Path) {
+				if !reviewableKinds[sym.Kind] {
+					continue
+				}
+				addChangedSymbol(&out, baseGraph, sym, impactedUnion, atRiskTests)
+			}
+			continue
+		}
+		if len(d.Hunks) == 0 {
+			continue
 		}
 		for _, sym := range touchedSymbols(defsByFile[filepath.ToSlash(d.Path)], d.Hunks) {
 			if !reviewableKinds[sym.Kind] {
 				continue
 			}
-			trans := g.Impact(sym.QName)
-			for _, q := range trans {
-				impactedUnion[q] = true
-				if isTestQName(q, g) {
-					atRiskTests[q] = true
-				}
-			}
-			out.ChangedSymbols = append(out.ChangedSymbols, changedSymbol{
-				QName: sym.QName, Symbol: sym.Display(), File: sym.File, Line: sym.Line,
-				Kind: sym.Kind, DirectCallers: len(g.Callers(sym.QName)), ImpactedCount: len(trans),
-			})
+			addChangedSymbol(&out, g, sym, impactedUnion, atRiskTests)
 		}
 	}
 
 	// Widest blast radius first — that's what a reviewer should look at hardest.
-	sort.Slice(out.ChangedSymbols, func(i, j int) bool {
-		a, b := out.ChangedSymbols[i], out.ChangedSymbols[j]
-		if a.ImpactedCount != b.ImpactedCount {
-			return a.ImpactedCount > b.ImpactedCount
+	slices.SortFunc(out.ChangedSymbols, func(a, b changedSymbol) int {
+		if c := cmp.Compare(b.ImpactedCount, a.ImpactedCount); c != 0 {
+			return c
 		}
-		if a.File != b.File {
-			return a.File < b.File
+		if c := cmp.Compare(a.File, b.File); c != 0 {
+			return c
 		}
-		return a.Line < b.Line
+		return cmp.Compare(a.Line, b.Line)
 	})
 
 	limit := in.Limit
@@ -156,13 +183,61 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 
 	out.AtRiskTests = sortedSet(atRiskTests)
 	out.ImpactedCount = len(impactedUnion)
-	out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol. Blast radius via the call graph: " +
+	deletionNote := ""
+	if deletions {
+		deletionNote = " Deleted files are analyzed against the base tree, because their symbols no longer exist in the working tree."
+	}
+	out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol." + deletionNote + " Blast radius via the call graph: " +
 		edgeCaveat(g) + goPrecisionHint(g, in.Precise)
 	if in.Precise && !g.Precise {
-		out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol. Blast radius via the call graph: " +
+		out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol." + deletionNote + " Blast radius via the call graph: " +
 			semanticPrecisionUnavailableNote() + edgeCaveat(g)
 	}
 	return out, nil
+}
+
+func diffBaseGraph(ctx context.Context, root, base string, precise bool) (*providers.Graph, error) {
+	tmp, err := os.MkdirTemp("", "onboard-base-*")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	deps := depsForContext(ctx)
+	if err := deps.Git.ArchiveTree(ctx, root, base, tmp); err != nil {
+		return nil, err
+	}
+	return deps.Graph.Index(ctx, tmp, true, precise)
+}
+
+func deletedFileSymbols(g *providers.Graph, path string) []*providers.Symbol {
+	slashed := filepath.ToSlash(path)
+	var out []*providers.Symbol
+	for _, sym := range g.Defs {
+		if sym == nil {
+			continue
+		}
+		if filepath.ToSlash(sym.File) == slashed {
+			out = append(out, sym)
+		}
+	}
+	slices.SortFunc(out, func(a, b *providers.Symbol) int {
+		return cmp.Compare(a.Line, b.Line)
+	})
+	return out
+}
+
+func addChangedSymbol(out *explainDiffOutput, g *providers.Graph, sym *providers.Symbol, impactedUnion, atRiskTests map[string]bool) {
+	trans := g.Impact(sym.QName)
+	for _, q := range trans {
+		impactedUnion[q] = true
+		if isTestQName(q, g) {
+			atRiskTests[q] = true
+		}
+	}
+	out.ChangedSymbols = append(out.ChangedSymbols, changedSymbol{
+		QName: sym.QName, Symbol: sym.Display(), File: sym.File, Line: sym.Line,
+		Kind: sym.Kind, DirectCallers: len(g.Callers(sym.QName)), ImpactedCount: len(trans),
+	})
 }
 
 // touchedSymbols returns the definitions in fileDefs (sorted by line) whose extent overlaps
@@ -194,16 +269,13 @@ func sortedSet(m map[string]bool) []string {
 	for k := range m {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
-func registerExplainDiffTool(s *mcp.Server) {
+func registerExplainDiffTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "explain_diff",
 		Description: "Explain a branch/PR: the files it changed, the symbols inside the changed lines, and each one's blast radius (transitive callers + at-risk tests). Scopes onboarding to a change set so it can run on every PR, not just once. Defaults the base to the merge-base with the default branch; pass `base` to override. Blast radius is syntactic (pass precise:true for type-checked Go).",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in explainDiffInput) (*mcp.CallToolResult, explainDiffOutput, error) {
-		out, err := explainDiff(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler(rt, "explain_diff", explainDiff))
 }

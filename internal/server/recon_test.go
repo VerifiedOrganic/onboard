@@ -151,23 +151,6 @@ func TestReconNoHotspotsOutsideGit(t *testing.T) {
 	}
 }
 
-func TestShouldSkipDir(t *testing.T) {
-	cases := map[string]bool{
-		"node_modules": true,
-		"vendor":       true,
-		".git":         true,
-		".idea":        true,
-		".github":      false, // explicitly kept
-		"src":          false,
-		"cmd":          false,
-	}
-	for name, want := range cases {
-		if got := shouldSkipDir(name); got != want {
-			t.Errorf("shouldSkipDir(%q) = %v, want %v", name, got, want)
-		}
-	}
-}
-
 func TestAddUniqueAndKeys(t *testing.T) {
 	got := addUnique(addUnique(addUnique(nil, "a"), "b"), "a")
 	if len(got) != 2 {

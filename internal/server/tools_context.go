@@ -1,16 +1,19 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/VerifiedOrganic/onboard/internal/pathutil"
 	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
@@ -83,7 +86,7 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 	if maxDist <= 0 {
 		maxDist = defaultPackDistance
 	}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -113,7 +116,7 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 			maxPR = v
 		}
 	}
-	churn := fileChurn(root)
+	churn := fileChurn(ctx, root, in.Refresh)
 	var maxLogChurn float64
 	for _, c := range churn {
 		if l := math.Log1p(float64(c)); l > maxLogChurn {
@@ -141,14 +144,14 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 			Score:    packScore(d, pr[q], maxPR, commits, maxLogChurn),
 		})
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Score != items[j].Score {
-			return items[i].Score > items[j].Score
+	slices.SortFunc(items, func(a, b contextItem) int {
+		if c := compareScoreDesc(a.Score, b.Score); c != 0 {
+			return c
 		}
-		if items[i].Distance != items[j].Distance {
-			return items[i].Distance < items[j].Distance
+		if c := cmp.Compare(a.Distance, b.Distance); c != 0 {
+			return c
 		}
-		return items[i].QName < items[j].QName
+		return cmp.Compare(a.QName, b.QName)
 	})
 	out.TotalCandidates = len(items)
 
@@ -194,6 +197,9 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 func resolveSeeds(g *providers.Graph, seed string) []*providers.Symbol {
 	var exact []*providers.Symbol
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		if s.Name == seed || s.QName == seed {
 			exact = append(exact, s)
 		}
@@ -205,6 +211,9 @@ func resolveSeeds(g *providers.Graph, seed string) []*providers.Symbol {
 	slashed := filepath.ToSlash(seed)
 	var sub []*providers.Symbol
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		if strings.Contains(filepath.ToSlash(s.File), slashed) || strings.Contains(s.QName, seed) {
 			sub = append(sub, s)
 		}
@@ -214,7 +223,9 @@ func resolveSeeds(g *providers.Graph, seed string) []*providers.Symbol {
 }
 
 func sortSyms(s []*providers.Symbol) {
-	sort.Slice(s, func(i, j int) bool { return s[i].QName < s[j].QName })
+	slices.SortFunc(s, func(a, b *providers.Symbol) int {
+		return cmp.Compare(a.QName, b.QName)
+	})
 }
 
 // neighborhood does a breadth-first walk outward from the seeds over BOTH directions
@@ -271,6 +282,9 @@ func packScore(d int, pr, maxPR float64, commits int, maxLogChurn float64) float
 func defLinesByFile(g *providers.Graph) map[string][]int {
 	m := map[string][]int{}
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		m[s.File] = append(m[s.File], s.Line)
 	}
 	for f := range m {
@@ -287,7 +301,12 @@ func defLinesByFile(g *providers.Graph) map[string][]int {
 func extractSnippet(root, file string, startLine int, fileDefLines []int, cache map[string][]string) (string, int) {
 	lines, ok := cache[file]
 	if !ok {
-		data, err := os.ReadFile(filepath.Join(root, file))
+		path, err := pathutil.JoinUnderRoot(root, file)
+		if err != nil {
+			cache[file] = nil
+			return "", startLine
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			cache[file] = nil
 			return "", startLine
@@ -332,12 +351,9 @@ func renderPackBlock(it contextItem) string {
 	return header + it.Snippet + "\n\n"
 }
 
-func registerContextPackTool(s *mcp.Server) {
+func registerContextPackTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "context_pack",
 		Description: "Assemble a ranked, token-budgeted bundle of the source most relevant to a seed symbol or file — retrieval-augmented context with no embedding model. Relevance is call-graph proximity to the seed (callers and callees), refined by centrality and git churn. Use to load 'everything I need to understand or change X' in one shot.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in contextPackInput) (*mcp.CallToolResult, contextPackOutput, error) {
-		out, err := contextPack(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler(rt, "context_pack", contextPack))
 }

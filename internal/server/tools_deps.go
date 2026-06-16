@@ -1,14 +1,17 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/VerifiedOrganic/onboard/internal/scan"
 )
 
 // deps extracts the EXTERNAL dependency graph straight from manifests — a deterministic fact,
@@ -26,50 +29,17 @@ type depsInput struct {
 	Format string `json:"format,omitempty" jsonschema:"set to \"mermaid\" to also return a dependency flowchart; default returns structured data only"`
 }
 
-type dependency struct {
-	Name      string `json:"name"`
-	Version   string `json:"version,omitempty"`
-	Kind      string `json:"kind,omitempty"`   // normal | dev | build | peer | optional
-	Target    string `json:"target,omitempty"` // target cfg for platform-specific deps
-	Optional  bool   `json:"optional,omitempty"`
-	Dev       bool   `json:"dev,omitempty"`       // development-only dependency
-	Workspace bool   `json:"workspace,omitempty"` // true if it is a local workspace package
-}
-
-type rustTarget struct {
-	Name       string   `json:"name"`
-	Kind       []string `json:"kind,omitempty"`
-	CrateTypes []string `json:"crate_types,omitempty"`
-	SrcPath    string   `json:"src_path,omitempty"`
-	Edition    string   `json:"edition,omitempty"`
-}
-
-type manifestDeps struct {
-	Manifest              string            `json:"manifest"`  // repo-relative path
-	Ecosystem             string            `json:"ecosystem"` // Go, JavaScript/TypeScript (npm), ...
-	Module                string            `json:"module,omitempty"`
-	Direct                []dependency      `json:"direct"`
-	Indirect              int               `json:"indirect,omitempty"` // count of indirect deps (go.mod)
-	Targets               []rustTarget      `json:"targets,omitempty"`  // Cargo targets, when Cargo metadata is available
-	WorkspaceDependencies []string          `json:"workspace_dependencies,omitempty"`
-	PackageManager        string            `json:"package_manager,omitempty"`
-	Workspaces            []string          `json:"workspaces,omitempty"`
-	Scripts               map[string]string `json:"scripts,omitempty"`
-	Engines               map[string]string `json:"engines,omitempty"`
-	DetectedTools         []string          `json:"detected_tools,omitempty"`
-}
-
 type depsOutput struct {
-	Manifests   []manifestDeps `json:"manifests"`
-	TotalDirect int            `json:"total_direct"`
-	Mermaid     string         `json:"mermaid,omitempty"`
-	Truncated   bool           `json:"truncated,omitempty"`
-	Note        string         `json:"note,omitempty"`
+	Manifests   []scan.ManifestDeps `json:"manifests"`
+	TotalDirect int                 `json:"total_direct"`
+	Mermaid     string              `json:"mermaid,omitempty"`
+	Truncated   bool                `json:"truncated,omitempty"`
+	Note        string              `json:"note,omitempty"`
 }
 
 func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 	out := depsOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -79,7 +49,7 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if p != root && shouldSkipDir(d.Name()) {
+			if p != root && scan.ShouldSkipDir(d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
@@ -88,14 +58,14 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 			out.Truncated = true
 			return fs.SkipDir
 		}
-		md, ok := parseManifest(root, p, d.Name())
+		md, ok := scan.ParseManifest(root, p, d.Name())
 		if ok {
 			out.Manifests = append(out.Manifests, md)
 		}
 		return nil
 	})
 
-	if cargo, ok := loadCargoMetadata(ctx, root); ok {
+	if cargo, ok := scan.LoadCargoMetadata(ctx, root); ok {
 		for i := range out.Manifests {
 			if md, found := cargo[out.Manifests[i].Manifest]; found {
 				out.Manifests[i] = md
@@ -103,7 +73,6 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 		}
 	}
 
-	// Build local workspace dependency graph
 	pkgToManifest := map[string]string{}
 	for _, m := range out.Manifests {
 		if m.Module != "" {
@@ -121,7 +90,7 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 				workspaceDeps = append(workspaceDeps, targetManifest)
 			}
 		}
-		sort.Strings(workspaceDeps)
+		slices.Sort(workspaceDeps)
 		var uniqueWorkspaceDeps []string
 		for k, w := range workspaceDeps {
 			if k == 0 || w != workspaceDeps[k-1] {
@@ -131,7 +100,9 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 		m.WorkspaceDependencies = uniqueWorkspaceDeps
 	}
 
-	sort.Slice(out.Manifests, func(i, j int) bool { return out.Manifests[i].Manifest < out.Manifests[j].Manifest })
+	slices.SortFunc(out.Manifests, func(a, b scan.ManifestDeps) int {
+		return cmp.Compare(a.Manifest, b.Manifest)
+	})
 	for _, m := range out.Manifests {
 		out.TotalDirect += len(m.Direct)
 	}
@@ -147,12 +118,7 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 	return out, nil
 }
 
-// Per-ecosystem manifest parsing (parseManifest, parseGoMod, parsePackageJSON,
-// parseRequirements, parseCargoToml, and helpers) lives in manifests.go.
-
-// renderDepsMermaid draws a flowchart of each manifest's module pointing at its direct
-// dependencies, capping total dependency nodes so the diagram stays legible.
-func renderDepsMermaid(manifests []manifestDeps) (string, bool) {
+func renderDepsMermaid(manifests []scan.ManifestDeps) (string, bool) {
 	var b strings.Builder
 	b.WriteString("flowchart LR\n")
 	shown, truncated := 0, false
@@ -179,12 +145,9 @@ func renderDepsMermaid(manifests []manifestDeps) (string, bool) {
 	return b.String(), truncated
 }
 
-func registerDepsTool(s *mcp.Server) {
+func registerDepsTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "deps",
 		Description: "Extract the external dependency graph from a repo's manifests (go.mod, package.json, requirements.txt, Cargo.toml, Terraform required_providers + lock files, external module sources) — direct dependencies with declared versions per manifest, optionally as a Mermaid flowchart. Facts read from manifests, not inferred. Use to ground a dependency diagram or answer 'what does this project depend on'.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in depsInput) (*mcp.CallToolResult, depsOutput, error) {
-		out, err := depsExtract(ctx, in)
-		return nil, out, err
-	})
+	}, toolHandler(rt, "deps", depsExtract))
 }

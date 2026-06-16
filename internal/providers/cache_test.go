@@ -1,4 +1,4 @@
-package providers
+package providers_test
 
 import (
 	"context"
@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/indexer"
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
 func writeFile(t *testing.T, dir, rel, content string) {
@@ -15,7 +18,7 @@ func writeFile(t *testing.T, dir, rel, content string) {
 	}
 }
 
-func calleesOf(g *Graph, name string) []string {
+func calleesOf(g *providers.Graph, name string) []string {
 	syms := g.FindSymbols(name)
 	if len(syms) == 0 {
 		return nil
@@ -31,12 +34,12 @@ func TestIndexWithCacheReusesUnchangedFiles(t *testing.T) {
 	ctx := context.Background()
 
 	// First run: both files parsed from scratch and the cache written.
-	g1, err := (Builtin{}).IndexWithCache(ctx, root, cache)
+	g1, err := (indexer.Builtin{}).IndexWithCache(ctx, root, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g1.Files != 2 || g1.retagged != 2 || g1.reused != 0 {
-		t.Fatalf("first run: files=%d retagged=%d reused=%d, want 2/2/0", g1.Files, g1.retagged, g1.reused)
+	if g1.Files != 2 || g1.Retagged != 2 || g1.Reused != 0 {
+		t.Fatalf("first run: files=%d retagged=%d reused=%d, want 2/2/0", g1.Files, g1.Retagged, g1.Reused)
 	}
 	if _, err := os.Stat(cache); err != nil {
 		t.Fatalf("cache file not written: %v", err)
@@ -47,12 +50,12 @@ func TestIndexWithCacheReusesUnchangedFiles(t *testing.T) {
 	}
 
 	// Second run, no changes: everything reused, nothing re-parsed; graph unchanged.
-	g2, err := (Builtin{}).IndexWithCache(ctx, root, cache)
+	g2, err := (indexer.Builtin{}).IndexWithCache(ctx, root, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g2.reused != 2 || g2.retagged != 0 {
-		t.Fatalf("unchanged run: reused=%d retagged=%d, want 2/0", g2.reused, g2.retagged)
+	if g2.Reused != 2 || g2.Retagged != 0 {
+		t.Fatalf("unchanged run: reused=%d retagged=%d, want 2/0", g2.Reused, g2.Retagged)
 	}
 	if len(g2.Defs) != len(g1.Defs) {
 		t.Errorf("def count changed across identical runs: %d vs %d", len(g2.Defs), len(g1.Defs))
@@ -64,12 +67,12 @@ func TestIndexWithCacheReusesUnchangedFiles(t *testing.T) {
 	// Change only app.go: just that file is re-parsed, util.go is reused, and the new
 	// symbol and its edge appear.
 	writeFile(t, root, "app.go", "package app\nfunc helper() int { return Util() }\nfunc Run() int { return helper() }\nfunc Extra() int { return Util() }\n")
-	g3, err := (Builtin{}).IndexWithCache(ctx, root, cache)
+	g3, err := (indexer.Builtin{}).IndexWithCache(ctx, root, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g3.retagged != 1 || g3.reused != 1 {
-		t.Fatalf("after editing app.go: retagged=%d reused=%d, want 1/1", g3.retagged, g3.reused)
+	if g3.Retagged != 1 || g3.Reused != 1 {
+		t.Fatalf("after editing app.go: retagged=%d reused=%d, want 1/1", g3.Retagged, g3.Reused)
 	}
 	if len(g3.FindSymbols("Extra")) == 0 {
 		t.Error("new symbol Extra not indexed after incremental update")
@@ -87,19 +90,19 @@ func TestIndexWithCacheStaleVersionRebuilds(t *testing.T) {
 	if err := os.WriteFile(cache, []byte(`{"v":999,"files":{"a.go":{"h":"x"}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	g, err := (Builtin{}).IndexWithCache(context.Background(), root, cache)
+	g, err := (indexer.Builtin{}).IndexWithCache(context.Background(), root, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.reused != 0 || g.retagged != 1 {
-		t.Errorf("stale-version cache should be ignored: reused=%d retagged=%d, want 0/1", g.reused, g.retagged)
+	if g.Reused != 0 || g.Retagged != 1 {
+		t.Errorf("stale-version cache should be ignored: reused=%d retagged=%d, want 0/1", g.Reused, g.Retagged)
 	}
 }
 
 func TestIndexWithoutCacheStillWorks(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "a.go", "package a\nfunc F() {}\nfunc G() { F() }\n")
-	g, err := (Builtin{}).Index(context.Background(), root)
+	g, err := (indexer.Builtin{}).Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
