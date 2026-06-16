@@ -49,7 +49,7 @@ func traceFlow(ctx context.Context, in traceFlowInput) (traceFlowOutput, error) 
 	if depth <= 0 {
 		depth = 4
 	}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -218,7 +218,7 @@ func impactAnalysis(ctx context.Context, in impactInput) (impactOutput, error) {
 		TransitiveCallers: []string{},
 		AtRiskTests:       []string{},
 	}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -273,14 +273,14 @@ func ambiguityNote(query string, syms []*providers.Symbol) string {
 		query, len(syms), syms[0].QName)
 }
 
-func registerGraphTools(s *mcp.Server) {
+func registerGraphTools(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "trace_flow",
 		Description: "Trace an execution flow from an entry symbol through its callees (breadth-first to a depth). Use to follow a request/operation end to end. Backed by a syntactic call graph.",
-	}, toolHandler("trace_flow", traceFlow))
+	}, toolHandler(rt, "trace_flow", traceFlow))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "impact",
 		Description: "Compute the blast radius of changing a symbol: direct callers, all transitive callers, and which of those are tests. Use to answer 'what breaks if I change X' before editing.",
-	}, toolHandler("impact", impactAnalysis))
+	}, toolHandler(rt, "impact", impactAnalysis))
 }

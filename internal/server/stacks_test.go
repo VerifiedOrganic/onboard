@@ -86,7 +86,7 @@ terraform {
 
 func TestStacksTerragruntUnits(t *testing.T) {
 	root := terragruntFixture(t)
-	out, err := stacksExtract(stacksInput{Root: root})
+	out, err := stacksExtract(context.Background(), stacksInput{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestStacksTerragruntUnits(t *testing.T) {
 func TestStacksEmptyRepoNote(t *testing.T) {
 	root := t.TempDir()
 	writeStackFile(t, root, "main.go", "package main\n")
-	out, err := stacksExtract(stacksInput{Root: root})
+	out, err := stacksExtract(context.Background(), stacksInput{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestStacksEmptyRepoNote(t *testing.T) {
 func TestStacksModulesOnlyNote(t *testing.T) {
 	root := t.TempDir()
 	writeStackFile(t, root, "modules/a/main.tf", `variable "x" { type = string }`)
-	out, err := stacksExtract(stacksInput{Root: root})
+	out, err := stacksExtract(context.Background(), stacksInput{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}

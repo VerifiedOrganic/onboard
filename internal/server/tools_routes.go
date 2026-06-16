@@ -25,9 +25,9 @@ type routesOutput struct {
 	Note      string       `json:"note,omitempty"`
 }
 
-func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
+func routesExtract(ctx context.Context, in routesInput) (routesOutput, error) {
 	out := routesOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -39,9 +39,9 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 	return out, nil
 }
 
-func registerRoutesTool(s *mcp.Server) {
+func registerRoutesTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "routes",
 		Description: "Extract the HTTP API surface — method, path, and source location for each route — from common framework registration patterns (Go chi/gin/echo/gorilla/net-http, Express, Flask, FastAPI). A recall-oriented heuristic across frameworks, not a parser. Use to map a service's endpoints.",
-	}, toolHandler("routes", routesExtract))
+	}, toolHandler(rt, "routes", routesExtract))
 }

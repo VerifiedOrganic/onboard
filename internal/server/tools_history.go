@@ -26,11 +26,12 @@ type historyOutput struct {
 
 func history(ctx context.Context, in historyInput) (historyOutput, error) {
 	out := historyOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
-	if !serverDeps.Git.Available(root) {
+	deps := depsForContext(ctx)
+	if !deps.Git.Available(root) {
 		out.Note = "Not a git repository — no history signals available."
 		return out, nil
 	}
@@ -44,7 +45,7 @@ func history(ctx context.Context, in historyInput) (historyOutput, error) {
 		maxCommits = 0 // git.History treats 0 as unbounded
 	}
 
-	files, err := serverDeps.Git.History(ctx, root, maxCommits)
+	files, err := deps.Git.History(ctx, root, maxCommits)
 	if err != nil {
 		return out, err
 	}
@@ -64,9 +65,9 @@ func history(ctx context.Context, in historyInput) (historyOutput, error) {
 	return out, nil
 }
 
-func registerHistoryTool(s *mcp.Server) {
+func registerHistoryTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "history",
 		Description: "Surface git change-history signals: the files with the most churn (commit count), their additions/deletions, last-changed date, and distinct author count. High-churn, multi-author files are onboarding hotspots and prime risk-audit targets. Requires a git repository.",
-	}, toolHandler("history", history))
+	}, toolHandler(rt, "history", history))
 }

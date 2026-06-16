@@ -59,7 +59,7 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 	if out.Format != "mermaid" {
 		out.Format = "html"
 	}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -281,9 +281,9 @@ func deriveMap(g *providers.Graph, maxNodes int) (nodes []mapNode, edges []mapEd
 // Mermaid/HTML rendering (renderMermaid, renderMapHTML, the sanitizers, and the HTML
 // template) lives in map_render.go.
 
-func registerMapTool(s *mcp.Server) {
+func registerMapTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "render_map",
 		Description: "Render a navigable map of the codebase. With explicit nodes/edges it renders exactly those; otherwise it derives a package-level dependency map from the code graph. Format 'html' produces a self-contained interactive file (Mermaid + pan/zoom + click-to-detail); 'mermaid' produces diagram-as-code suitable for committing.",
-	}, toolHandler("render_map", renderMap))
+	}, toolHandler(rt, "render_map", renderMap))
 }

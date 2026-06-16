@@ -64,29 +64,30 @@ var reviewableKinds = map[string]bool{
 
 func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, error) {
 	out := explainDiffOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
-	if !serverDeps.Git.Available(root) {
+	deps := depsForContext(ctx)
+	if !deps.Git.Available(root) {
 		out.Note = "Not a git repository — nothing to diff."
 		return out, nil
 	}
 
 	base := in.Base
 	if base == "" {
-		if base = serverDeps.Git.DefaultBase(root); base == "" {
+		if base = deps.Git.DefaultBase(root); base == "" {
 			out.Note = "Could not detect a base branch (origin/main, main, master). Pass `base` (a branch, tag, or SHA) explicitly."
 			return out, nil
 		}
 	}
 	out.Base = base
-	if err := serverDeps.Git.ValidateRef(root, base); err != nil {
+	if err := deps.Git.ValidateRef(root, base); err != nil {
 		out.Note = err.Error()
 		return out, nil
 	}
 
-	diffs, err := serverDeps.Git.Diff(ctx, root, base)
+	diffs, err := deps.Git.Diff(ctx, root, base)
 	if err != nil {
 		return out, err
 	}
@@ -201,10 +202,11 @@ func diffBaseGraph(ctx context.Context, root, base string, precise bool) (*provi
 		return nil, err
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
-	if err := serverDeps.Git.ArchiveTree(ctx, root, base, tmp); err != nil {
+	deps := depsForContext(ctx)
+	if err := deps.Git.ArchiveTree(ctx, root, base, tmp); err != nil {
 		return nil, err
 	}
-	return serverDeps.Graph.Index(ctx, tmp, true, precise)
+	return deps.Graph.Index(ctx, tmp, true, precise)
 }
 
 func deletedFileSymbols(g *providers.Graph, path string) []*providers.Symbol {
@@ -271,9 +273,9 @@ func sortedSet(m map[string]bool) []string {
 	return out
 }
 
-func registerExplainDiffTool(s *mcp.Server) {
+func registerExplainDiffTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "explain_diff",
 		Description: "Explain a branch/PR: the files it changed, the symbols inside the changed lines, and each one's blast radius (transitive callers + at-risk tests). Scopes onboarding to a change set so it can run on every PR, not just once. Defaults the base to the merge-base with the default branch; pass `base` to override. Blast radius is syntactic (pass precise:true for type-checked Go).",
-	}, toolHandler("explain_diff", explainDiff))
+	}, toolHandler(rt, "explain_diff", explainDiff))
 }

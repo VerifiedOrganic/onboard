@@ -13,6 +13,8 @@ package server
 // (Vault paths, tokens) that has no business in a tool transcript.
 
 import (
+	"context"
+
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/VerifiedOrganic/onboard/internal/scan"
@@ -29,16 +31,16 @@ type stacksOutput struct {
 	Note      string           `json:"note,omitempty"`
 }
 
-func registerStacksTool(s *mcp.Server) {
+func registerStacksTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "stacks",
 		Description: "List a repo's deployable infrastructure units (Terraform/Terragrunt/OpenTofu): each Terragrunt unit and Terraform root module with its module source, include chain, inter-stack dependencies, state backend and key pattern, and input names. The IaC analogue of the routes tool — facts read from HCL, with unresolvable interpolations left symbolic. Input values are never returned (they can carry secrets).",
-	}, toolHandlerNoCtx("stacks", stacksExtract))
+	}, toolHandler(rt, "stacks", stacksExtract))
 }
 
-func stacksExtract(in stacksInput) (stacksOutput, error) {
+func stacksExtract(ctx context.Context, in stacksInput) (stacksOutput, error) {
 	out := stacksOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}

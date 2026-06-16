@@ -68,18 +68,19 @@ var iacManifests = map[string]string{
 	".opentofu.lock.hcl":  "OpenTofu (HCL)",
 }
 
-func registerReconTool(s *mcp.Server) {
+func registerReconTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "recon",
 		Description: "Phase-1 reconnaissance: detect stack, frameworks, entry points, test layout, tooling, a pruned directory tree, and (in a git repo) the highest-churn hotspot files for a repository. A fast structural scan — reads no source beyond manifest filenames.",
-	}, withToolLog("recon", recon))
+	}, withToolLog(rt, "recon", recon))
 }
 
 func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.CallToolResult, reconOutput, error) {
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return nil, reconOutput{}, err
 	}
+	deps := depsForContext(ctx)
 	out := reconOutput{Root: root}
 
 	stackSet := map[string]bool{}
@@ -237,8 +238,8 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 	// Git churn hotspots: the files that change most are where understanding and risk
 	// concentrate, so point an onboarding reader at them first. Degrades silently outside
 	// a git work tree — the dedicated history tool gives the full view.
-	if serverDeps.Git.Available(root) {
-		if hist, herr := serverDeps.Git.History(ctx, root, reconHotspotCommits); herr == nil {
+	if deps.Git.Available(root) {
+		if hist, herr := deps.Git.History(ctx, root, reconHotspotCommits); herr == nil {
 			out.Hotspots = topHotspots(hist, 8)
 		}
 	}

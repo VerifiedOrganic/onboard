@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,11 +17,7 @@ func TestIntegrationRootPolicyRejectsOutsideAllowlist(t *testing.T) {
 	other := t.TempDir()
 	writeFixtureFile(t, allowed, "go.mod", "module example.com/allowed\n\ngo 1.21\n")
 
-	resetDeps()
-	t.Cleanup(resetDeps)
-	Configure(WithRootPolicy(pathutil.NewRootPolicy(allowed)))
-
-	cs, ctx := connect(t)
+	cs, ctx := connect(t, WithRootPolicy(pathutil.NewRootPolicy(allowed)))
 	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "recon",
 		Arguments: map[string]any{"root": other},
@@ -37,11 +34,7 @@ func TestIntegrationRootPolicyAllowsListedRoot(t *testing.T) {
 	allowed := t.TempDir()
 	writeFixtureFile(t, allowed, "go.mod", "module example.com/allowed\n\ngo 1.21\n")
 
-	resetDeps()
-	t.Cleanup(resetDeps)
-	Configure(WithRootPolicy(pathutil.NewRootPolicy(allowed)))
-
-	cs, ctx := connect(t)
+	cs, ctx := connect(t, WithRootPolicy(pathutil.NewRootPolicy(allowed)))
 	var out reconOutput
 	callStructured(ctx, t, cs, "recon", map[string]any{"root": allowed}, &out)
 	if out.Root != allowed {
@@ -56,7 +49,7 @@ func TestResolveRootRejectsOutsidePolicy(t *testing.T) {
 	t.Cleanup(resetDeps)
 	Configure(WithRootPolicy(pathutil.NewRootPolicy(base)))
 
-	_, err := resolveRoot(other)
+	_, err := resolveRoot(context.Background(), other)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -75,7 +68,7 @@ func TestResolveRootAllowsNestedUnderPolicy(t *testing.T) {
 	t.Cleanup(resetDeps)
 	Configure(WithRootPolicy(pathutil.NewRootPolicy(base)))
 
-	got, err := resolveRoot(nested)
+	got, err := resolveRoot(context.Background(), nested)
 	if err != nil {
 		t.Fatal(err)
 	}

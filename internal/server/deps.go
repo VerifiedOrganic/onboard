@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/VerifiedOrganic/onboard/internal/graph"
@@ -19,6 +20,8 @@ type Deps struct {
 	Logger *slog.Logger
 }
 
+type depsContextKey struct{}
+
 func defaultDeps() Deps {
 	return Deps{
 		Graph:  graph.DefaultService(),
@@ -29,7 +32,10 @@ func defaultDeps() Deps {
 	}
 }
 
-var serverDeps = defaultDeps()
+var (
+	serverDepsMu sync.RWMutex
+	serverDeps   = defaultDeps()
+)
 
 // Option configures server dependencies.
 type Option func(*Deps)
@@ -44,32 +50,61 @@ func WithLogger(l *slog.Logger) Option {
 	return func(d *Deps) { d.Logger = l }
 }
 
+func newDeps(opts ...Option) *Deps {
+	d := defaultDeps()
+	for _, o := range opts {
+		o(&d)
+	}
+	return &d
+}
+
 // Configure applies options to the package-level dependency set.
 func Configure(opts ...Option) {
+	serverDepsMu.Lock()
+	defer serverDepsMu.Unlock()
+
 	for _, o := range opts {
 		o(&serverDeps)
 	}
 }
 
-func resolveRoot(root string) (string, error) {
-	return serverDeps.Roots.ResolveRoot(root)
+func contextWithDeps(ctx context.Context, deps *Deps) context.Context {
+	return context.WithValue(ctx, depsContextKey{}, deps)
+}
+
+func depsForContext(ctx context.Context) Deps {
+	if deps, ok := ctx.Value(depsContextKey{}).(*Deps); ok && deps != nil {
+		return *deps
+	}
+
+	serverDepsMu.RLock()
+	defer serverDepsMu.RUnlock()
+	return serverDeps
+}
+
+func resolveRoot(ctx context.Context, root string) (string, error) {
+	return depsForContext(ctx).Roots.ResolveRoot(root)
 }
 
 func indexGraph(ctx context.Context, root string, refresh, precise bool) (*providers.Graph, error) {
-	return serverDeps.Graph.Index(ctx, root, refresh, precise)
+	return depsForContext(ctx).Graph.Index(ctx, root, refresh, precise)
 }
 
-func logTool(name string, start time.Time, err error) {
-	if serverDeps.Logger == nil {
+func logTool(ctx context.Context, name string, start time.Time, err error) {
+	logger := depsForContext(ctx).Logger
+	if logger == nil {
 		return
 	}
 	attrs := []any{"tool", name, "duration_ms", time.Since(start).Milliseconds()}
 	if err != nil {
 		attrs = append(attrs, "error", err.Error())
 	}
-	serverDeps.Logger.Info("mcp tool", attrs...)
+	logger.InfoContext(ctx, "mcp tool", attrs...)
 }
 
 func resetDeps() {
+	serverDepsMu.Lock()
+	defer serverDepsMu.Unlock()
+
 	serverDeps = defaultDeps()
 }

@@ -68,7 +68,7 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 	if maxTokens <= 0 {
 		maxTokens = 1000
 	}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -287,8 +287,9 @@ func fileChurnWithMax(ctx context.Context, root string, maxCommits int, refresh 
 	}
 
 	churn := map[string]int{}
-	if serverDeps.Git.Available(root) {
-		if hist, err := serverDeps.Git.History(ctx, root, maxCommits); err == nil {
+	deps := depsForContext(ctx)
+	if deps.Git.Available(root) {
+		if hist, err := deps.Git.History(ctx, root, maxCommits); err == nil {
 			for _, fs := range hist {
 				churn[filepath.ToSlash(fs.Path)] = fs.Commits
 			}
@@ -329,9 +330,9 @@ func estTokens(s string) int {
 	return 1
 }
 
-func registerRepoMapTool(s *mcp.Server) {
+func registerRepoMapTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "repo_map",
 		Description: "Rank the codebase by call-graph centrality (PageRank), blended with git churn when available, and return a compact, token-budgeted map of the most important symbols — the heavily-relied-upon, actively-changing core. Load it first for orientation. Pass focus (symbols/files) to bias the ranking toward an area you care about, or churn_weight to tune how much commit frequency matters.",
-	}, toolHandler("repo_map", repoMap))
+	}, toolHandler(rt, "repo_map", repoMap))
 }

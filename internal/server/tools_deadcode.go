@@ -49,7 +49,7 @@ type deadCodeOutput struct {
 
 func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 	out := deadCodeOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -424,9 +424,9 @@ func deadCodeNote(g *providers.Graph, requestedPrecise bool) string {
 	return base + goPrecisionHint(g, requestedPrecise) + precisionNotes(g)
 }
 
-func registerDeadCodeTool(s *mcp.Server) {
+func registerDeadCodeTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "dead_code",
 		Description: "Find callable definitions (functions and methods) that nothing in the repo calls — a lead for code that was written but never wired in (common in fast/AI builds). Ranked by confidence; excludes entry points and tests. Leads, not proof: reflection, codegen, framework registration, and external importers can hide callers (pass precise:true for Go or Rust semantic enrichment when available).",
-	}, toolHandler("dead_code", deadCode))
+	}, toolHandler(rt, "dead_code", deadCode))
 }

@@ -39,7 +39,7 @@ type depsOutput struct {
 
 func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 	out := depsOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -145,9 +145,9 @@ func renderDepsMermaid(manifests []scan.ManifestDeps) (string, bool) {
 	return b.String(), truncated
 }
 
-func registerDepsTool(s *mcp.Server) {
+func registerDepsTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "deps",
 		Description: "Extract the external dependency graph from a repo's manifests (go.mod, package.json, requirements.txt, Cargo.toml, Terraform required_providers + lock files, external module sources) — direct dependencies with declared versions per manifest, optionally as a Mermaid flowchart. Facts read from manifests, not inferred. Use to ground a dependency diagram or answer 'what does this project depend on'.",
-	}, toolHandler("deps", depsExtract))
+	}, toolHandler(rt, "deps", depsExtract))
 }

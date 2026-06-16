@@ -86,7 +86,7 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 	if maxDist <= 0 {
 		maxDist = defaultPackDistance
 	}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -351,9 +351,9 @@ func renderPackBlock(it contextItem) string {
 	return header + it.Snippet + "\n\n"
 }
 
-func registerContextPackTool(s *mcp.Server) {
+func registerContextPackTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "context_pack",
 		Description: "Assemble a ranked, token-budgeted bundle of the source most relevant to a seed symbol or file — retrieval-augmented context with no embedding model. Relevance is call-graph proximity to the seed (callers and callees), refined by centrality and git churn. Use to load 'everything I need to understand or change X' in one shot.",
-	}, toolHandler("context_pack", contextPack))
+	}, toolHandler(rt, "context_pack", contextPack))
 }

@@ -33,9 +33,9 @@ type schemaOutput struct {
 	Note          string              `json:"note,omitempty"`
 }
 
-func schemaExtract(_ context.Context, in schemaInput) (schemaOutput, error) {
+func schemaExtract(ctx context.Context, in schemaInput) (schemaOutput, error) {
 	out := schemaOutput{}
-	root, err := resolveRoot(in.Root)
+	root, err := resolveRoot(ctx, in.Root)
 	if err != nil {
 		return out, err
 	}
@@ -90,9 +90,9 @@ func schemaExtract(_ context.Context, in schemaInput) (schemaOutput, error) {
 	return out, nil
 }
 
-func registerSchemaTool(s *mcp.Server) {
+func registerSchemaTool(rt *serverRuntime, s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "schema",
 		Description: "Extract a database schema from SQL DDL (CREATE TABLE statements in .sql files / migrations): entities with columns and primary/foreign keys, the relationships between them, and a Mermaid erDiagram. Facts parsed from the DDL, not inferred. Use to ground an ERD or understand the data model.",
-	}, toolHandler("schema", schemaExtract))
+	}, toolHandler(rt, "schema", schemaExtract))
 }
