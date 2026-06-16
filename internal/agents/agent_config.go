@@ -35,14 +35,9 @@ func registerMCP(a Agent, binPath string) (configResult, error) {
 	return configResult{Action: "skipped"}, nil
 }
 
-// loadJSONObject reads a JSON config into a map. If the file exists but cannot be
-// parsed, it is backed up to <path>.onboard-bak and an empty object is returned —
-// we never silently clobber a config we don't understand.
-func loadJSONObject(path string) (map[string]any, error) {
-	root, _, err := loadJSONObjectDetailed(path)
-	return root, err
-}
-
+// loadJSONObjectDetailed reads a JSON config into a map. If the file exists but cannot be
+// parsed, it is backed up to <path>.onboard-bak and an empty object is returned — we never
+// silently clobber a config we don't understand.
 func loadJSONObjectDetailed(path string) (map[string]any, string, error) {
 	root := map[string]any{}
 	data, err := os.ReadFile(path)

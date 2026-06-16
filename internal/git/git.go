@@ -18,6 +18,10 @@ import (
 )
 
 const gitCommandTimeout = 30 * time.Second
+const (
+	maxArchiveFileBytes  int64 = 100 << 20
+	maxArchiveTotalBytes int64 = 500 << 20
+)
 
 // Available reports whether git is on PATH and root is inside a work tree.
 func Available(root string) bool {
@@ -138,6 +142,7 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 	}
 
 	tr := tar.NewReader(stdout)
+	var totalBytes int64
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -159,17 +164,27 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 				_ = cmd.Wait()
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
+			if hdr.Size < 0 || hdr.Size > maxArchiveFileBytes {
+				_ = cmd.Wait()
+				return fmt.Errorf("git archive file %q has unsupported size %d", hdr.Name, hdr.Size)
+			}
+			totalBytes += hdr.Size
+			if totalBytes > maxArchiveTotalBytes {
+				_ = cmd.Wait()
+				return fmt.Errorf("git archive exceeds maximum extracted size %d", maxArchiveTotalBytes)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				_ = cmd.Wait()
 				return err
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode).Perm())
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, tarFilePerm(hdr.Mode))
 			if err != nil {
 				_ = cmd.Wait()
 				return err
 			}
-			_, copyErr := io.Copy(f, tr)
+			// #nosec G110 -- git archive extraction is bounded by per-file and total byte limits above.
+			_, copyErr := io.CopyN(f, tr, hdr.Size)
 			closeErr := f.Close()
 			if copyErr != nil {
 				_ = cmd.Wait()
@@ -182,6 +197,15 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 		}
 	}
 	return cmd.Wait()
+}
+
+func tarFilePerm(mode int64) os.FileMode {
+	if mode < 0 {
+		return 0o600
+	}
+	perm := mode & 0o777
+	// #nosec G115 -- perm is masked to Unix permission bits before conversion.
+	return os.FileMode(uint32(perm))
 }
 
 // parseUnifiedDiff parses `git diff --unified=0` output into per-file changes. It is a
@@ -405,9 +429,9 @@ func renameTarget(p string) string {
 }
 
 func run(root string, args ...string) (string, error) {
-	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
 	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
+	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	out, err := cmd.Output()
 	if ctx.Err() == context.DeadlineExceeded {

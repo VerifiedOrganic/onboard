@@ -111,6 +111,7 @@ func TestExplainDiffIncludesDeletedFileSymbols(t *testing.T) {
 
 func runGit(t *testing.T, root string, args ...string) string {
 	t.Helper()
+	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
 	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

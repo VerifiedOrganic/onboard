@@ -191,7 +191,7 @@ func diffBaseGraph(ctx context.Context, root, base string, precise bool) (*provi
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 	if err := git.ArchiveTree(ctx, root, base, tmp); err != nil {
 		return nil, err
 	}

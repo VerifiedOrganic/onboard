@@ -161,9 +161,9 @@ func metricsHTTPHandler(metrics *httpMetrics, bearerToken string) http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "onboard_http_requests_total %d\n", metrics.requestsTotal.Load())
-		fmt.Fprintf(w, "onboard_http_unauthorized_total %d\n", metrics.unauthorizedTotal.Load())
-		fmt.Fprintf(w, "onboard_http_request_duration_seconds_total %.6f\n", float64(metrics.durationNanosTotal.Load())/float64(time.Second))
+		_, _ = fmt.Fprintf(w, "onboard_http_requests_total %d\n", metrics.requestsTotal.Load())
+		_, _ = fmt.Fprintf(w, "onboard_http_unauthorized_total %d\n", metrics.unauthorizedTotal.Load())
+		_, _ = fmt.Fprintf(w, "onboard_http_request_duration_seconds_total %.6f\n", float64(metrics.durationNanosTotal.Load())/float64(time.Second))
 	})
 }
 
