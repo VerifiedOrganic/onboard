@@ -26,17 +26,17 @@ import { foo as bar } from '../lib/helper';
 	writeJSFile(t, root, "lib/helper.js", "export const foo = 2;\n")
 
 	imports := parseJSImports(root, "src/main.js", readJSFile(t, filepath.Join(root, "src/main.js")))
-	if got := imports["def"].targetFile; got != "src/util.js" {
+	if got := imports["def"].TargetFile; got != "src/util.js" {
 		t.Fatalf("def -> %q, want src/util.js", got)
 	}
-	if got := imports["ns"].targetName; got != "*" {
-		t.Fatalf("ns targetName = %q, want *", got)
+	if got := imports["ns"].TargetName; got != "*" {
+		t.Fatalf("ns TargetName = %q, want *", got)
 	}
-	if got := imports["bar"].targetFile; got != "lib/helper.js" {
+	if got := imports["bar"].TargetFile; got != "lib/helper.js" {
 		t.Fatalf("bar -> %q, want lib/helper.js", got)
 	}
-	if got := imports["bar"].targetName; got != "foo" {
-		t.Fatalf("bar targetName = %q, want foo", got)
+	if got := imports["bar"].TargetName; got != "foo" {
+		t.Fatalf("bar TargetName = %q, want foo", got)
 	}
 }
 

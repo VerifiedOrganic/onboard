@@ -1,4 +1,4 @@
-package providers
+package precision
 
 import (
 	"bufio"
@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
 const (
@@ -27,8 +29,8 @@ const (
 // rust-analyzer binary and a Cargo project are available. Like EnrichGo, it is strictly
 // additive and non-fatal: any LSP, toolchain, indexing, or mapping failure leaves the
 // syntactic graph intact.
-func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
-	if g == nil || len(g.Defs) == 0 || !graphHasLang(g, "rust") {
+func EnrichRust(ctx context.Context, root string, g *providers.Graph) (int, error) {
+	if g == nil || len(g.Defs) == 0 || !providers.GraphHasLang(g, "rust") {
 		return 0, nil
 	}
 	if ok, reason := rustAnalyzerStatus(root); !ok {
@@ -61,7 +63,7 @@ func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
 			continue
 		}
 		f := filepath.ToSlash(s.File)
-		byPos[posKey(f, s.Line, s.Name)] = q
+		byPos[providers.PosKey(f, s.Line, s.Name)] = q
 		byFileLine[f+"\x00"+strconv.Itoa(s.Line)] = append(byFileLine[f+"\x00"+strconv.Itoa(s.Line)], q)
 	}
 	resolve := func(absFile string, line int, name string) (string, bool) {
@@ -70,7 +72,7 @@ func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
 			return "", false
 		}
 		f := filepath.ToSlash(rel)
-		if q, ok := byPos[posKey(f, line, name)]; ok {
+		if q, ok := byPos[providers.PosKey(f, line, name)]; ok {
 			return q, true
 		}
 		if qs := byFileLine[f+"\x00"+strconv.Itoa(line)]; len(qs) == 1 {
@@ -82,7 +84,7 @@ func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
 	if g.ProvenEdges == nil {
 		g.ProvenEdges = map[string]bool{}
 	}
-	edgesSeen := edgeSetFromGraph(g)
+	edgesSeen := providers.EdgeSetFromGraph(g)
 	added := 0
 	proved := false
 	for _, e := range edges {
@@ -94,13 +96,13 @@ func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
 		if !ok || caller == callee {
 			continue
 		}
-		key := edgeKey(caller, callee)
+		key := providers.EdgeKey(caller, callee)
 		if g.ProvenEdges[key] {
 			continue
 		}
 		proved = true
 		g.ProvenEdges[key] = true
-		if edgesSeen.add(g, caller, callee) {
+		if edgesSeen.Add(g, caller, callee) {
 			added++
 		}
 	}
@@ -128,7 +130,7 @@ type rustPreciseEdge struct {
 	calleeName string
 }
 
-func rustAnalyzerEdges(ctx context.Context, root string, g *Graph) (out []rustPreciseEdge, stats rustAnalyzerStats) {
+func rustAnalyzerEdges(ctx context.Context, root string, g *providers.Graph) (out []rustPreciseEdge, stats rustAnalyzerStats) {
 	defer func() {
 		if v := recover(); v != nil {
 			out = nil
@@ -205,7 +207,7 @@ func rustPrecisionFailure(err error) string {
 	return err.Error()
 }
 
-func rustCallableQNames(g *Graph) ([]string, int, bool) {
+func rustCallableQNames(g *providers.Graph) ([]string, int, bool) {
 	type candidate struct {
 		qname   string
 		rank    float64
@@ -548,7 +550,8 @@ func filePathFromURI(raw string) string {
 	return filepath.Clean(u.Path)
 }
 
-func rustAnalyzerAvailable(root string) bool {
+// RustAnalyzerAvailable reports whether rust-analyzer can run for root.
+func RustAnalyzerAvailable(root string) bool {
 	ok, _ := rustAnalyzerStatus(root)
 	return ok
 }
@@ -577,13 +580,4 @@ func rustAnalyzerStatus(root string) (bool, string) {
 		}
 		dir = parent
 	}
-}
-
-func graphHasLang(g *Graph, lang string) bool {
-	for _, l := range g.Langs {
-		if strings.EqualFold(l, lang) {
-			return true
-		}
-	}
-	return false
 }

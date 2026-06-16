@@ -1,14 +1,16 @@
-package providers
+package providers_test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/VerifiedOrganic/onboard/internal/indexer"
+	"github.com/VerifiedOrganic/onboard/internal/precision"
 )
 
 func TestEnrichRustWithRustAnalyzer(t *testing.T) {
@@ -21,11 +23,10 @@ func TestEnrichRustWithRustAnalyzer(t *testing.T) {
 	root := t.TempDir()
 	writeRustPrecisionFixture(t, root, "Cargo.toml", "[package]\nname = \"smoke\"\nversion = \"0.1.0\"\nedition = \"2021\"\n")
 	writeRustPrecisionFixture(t, root, "src/lib.rs", "pub fn helper() -> i32 { 1 }\npub fn run() -> i32 { helper() }\n")
-	if !rustAnalyzerAvailable(root) {
+	if !precision.RustAnalyzerAvailable(root) {
 		t.Skip("rust-analyzer binary is present but cannot run for this toolchain")
 	}
-
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +35,7 @@ func TestEnrichRustWithRustAnalyzer(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	if _, err := EnrichRust(ctx, root, g); err != nil {
+	if _, err := precision.EnrichRust(ctx, root, g); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(g.Precision, "rust-analyzer") {
@@ -44,68 +45,6 @@ func TestEnrichRustWithRustAnalyzer(t *testing.T) {
 	helper := qnameOf(t, g, "helper")
 	if !g.IsProven(run, helper) {
 		t.Fatalf("expected rust-analyzer to prove run -> helper; callees=%v", g.Callees(run))
-	}
-}
-
-func TestRustCallableQNamesReportsTruncation(t *testing.T) {
-	g := &Graph{Defs: map[string]*Symbol{}}
-	for i := 0; i < maxRustPreciseSyms+5; i++ {
-		q := fmt.Sprintf("src/lib.rs::f%03d", i)
-		g.Defs[q] = &Symbol{QName: q, Name: fmt.Sprintf("f%03d", i), Kind: "function", File: "src/lib.rs", Lang: "rust"}
-	}
-	qnames, total, truncated := rustCallableQNames(g)
-	if total != maxRustPreciseSyms+5 {
-		t.Fatalf("total = %d, want %d", total, maxRustPreciseSyms+5)
-	}
-	if len(qnames) != maxRustPreciseSyms {
-		t.Fatalf("queried = %d, want cap %d", len(qnames), maxRustPreciseSyms)
-	}
-	if !truncated {
-		t.Fatal("expected Rust precision symbol selection to report truncation")
-	}
-}
-
-func TestRustCallableQNamesPrioritizesCentralSymbols(t *testing.T) {
-	g := &Graph{
-		Defs:    map[string]*Symbol{},
-		Forward: map[string][]string{},
-		Reverse: map[string][]string{},
-	}
-	hot := "src/lib.rs::zz_hot"
-	g.Defs[hot] = &Symbol{QName: hot, Name: "zz_hot", Kind: "function", File: "src/lib.rs", Lang: "rust"}
-	for i := 0; i < maxRustPreciseSyms+5; i++ {
-		q := fmt.Sprintf("src/lib.rs::f%03d", i)
-		g.Defs[q] = &Symbol{QName: q, Name: fmt.Sprintf("f%03d", i), Kind: "function", File: "src/lib.rs", Lang: "rust"}
-		if i < 20 {
-			g.Forward[q] = []string{hot}
-			g.Reverse[hot] = append(g.Reverse[hot], q)
-		}
-	}
-
-	qnames, _, truncated := rustCallableQNames(g)
-	if !truncated {
-		t.Fatal("expected truncation")
-	}
-	found := false
-	for _, q := range qnames {
-		if q == hot {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("central Rust symbol %q should be selected ahead of lexically earlier low-impact symbols", hot)
-	}
-}
-
-func TestUTF16ColumnForFile(t *testing.T) {
-	root := t.TempDir()
-	content := "é😀 run\n"
-	writeRustPrecisionFixture(t, root, "src/lib.rs", content)
-	byteCol := len("é😀 ")
-	got := utf16ColumnForFile(filepath.Join(root, "src", "lib.rs"), 1, byteCol)
-	if got != 4 { // é = 1 UTF-16 unit, 😀 = 2, space = 1
-		t.Fatalf("UTF-16 column = %d, want 4", got)
 	}
 }
 

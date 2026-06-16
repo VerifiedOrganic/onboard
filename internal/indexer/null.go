@@ -1,4 +1,4 @@
-package providers
+package indexer
 
 import (
 	"bytes"
@@ -8,17 +8,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
-// Null is the fallback provider: it lists definitions via regex but produces no
-// call edges. It exists so trace/impact degrade gracefully if the Builtin engine
-// cannot index a tree at all. Results are intentionally coarse.
+// Null is the fallback provider: definitions via regex, no call edges.
 type Null struct{}
 
 // Name returns the provider identifier.
 func (Null) Name() string { return "null" }
 
-// defPatterns maps a file extension to regexes whose first submatch is a symbol name.
 var defPatterns = map[string][]*regexp.Regexp{
 	".go": {regexp.MustCompile(`(?m)^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*[\(\[]`)},
 	".py": {
@@ -33,14 +32,14 @@ var defPatterns = map[string][]*regexp.Regexp{
 }
 
 // Index walks root and extracts coarse definitions with regular expressions.
-func (Null) Index(ctx context.Context, root string) (*Graph, error) {
-	root, err := normalizeRoot(root)
+func (Null) Index(ctx context.Context, root string) (*providers.Graph, error) {
+	root, err := providers.NormalizeRoot(root)
 	if err != nil {
 		return nil, err
 	}
-	g := &Graph{
+	g := &providers.Graph{
 		Provider: "null",
-		Defs:     map[string]*Symbol{},
+		Defs:     map[string]*providers.Symbol{},
 		Forward:  map[string][]string{},
 		Reverse:  map[string][]string{},
 		Note:     "Fallback provider: definitions only, no call graph. trace_flow/impact are unavailable.",
@@ -55,7 +54,7 @@ func (Null) Index(ctx context.Context, root string) (*Graph, error) {
 			return ctx.Err()
 		}
 		if d.IsDir() {
-			if p != root && skipDir(d.Name()) {
+			if p != root && providers.SkipDir(d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
@@ -79,8 +78,8 @@ func (Null) Index(ctx context.Context, root string) (*Graph, error) {
 				}
 				name := string(src[m[2]:m[3]])
 				line := 1 + bytes.Count(src[:m[0]], []byte("\n"))
-				qn := uniqueQName(g.Defs, rel, name, line)
-				g.Defs[qn] = &Symbol{QName: qn, Name: name, Kind: "symbol", File: rel, Line: line, Lang: ext}
+				qn := providers.UniqueQName(g.Defs, rel, name, line)
+				g.Defs[qn] = &providers.Symbol{QName: qn, Name: name, Kind: "symbol", File: rel, Line: line, Lang: ext}
 			}
 		}
 		return nil
@@ -88,6 +87,6 @@ func (Null) Index(ctx context.Context, root string) (*Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	g.Langs = sortedKeys(langSet)
+	g.Langs = providers.SortedKeys(langSet)
 	return g, nil
 }

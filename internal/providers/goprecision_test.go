@@ -1,4 +1,4 @@
-package providers
+package providers_test
 
 import (
 	"context"
@@ -6,6 +6,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/indexer"
+	"github.com/VerifiedOrganic/onboard/internal/precision"
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
 func writeGoFile(t *testing.T, dir, rel, content string) {
@@ -45,8 +49,8 @@ func Run() float64 { return Measure(Circle{R: 2}) }
 	return root
 }
 
-func defsNamed(g *Graph, name string) []*Symbol {
-	var out []*Symbol
+func defsNamed(g *providers.Graph, name string) []*providers.Symbol {
+	var out []*providers.Symbol
 	for _, s := range g.Defs {
 		if s.Name == name {
 			out = append(out, s)
@@ -63,7 +67,7 @@ func TestEnrichGoResolvesInterfaceDispatch(t *testing.T) {
 	ctx := context.Background()
 
 	// Syntactic baseline: Measure's call to Area() is ambiguous, so no edge is resolved.
-	base, err := (Builtin{}).Index(ctx, root)
+	base, err := (indexer.Builtin{}).Index(ctx, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,11 +84,11 @@ func TestEnrichGoResolvesInterfaceDispatch(t *testing.T) {
 	}
 
 	// Precise: VTA over the type-checked SSA resolves Measure -> Circle.Area.
-	g, err := (Builtin{}).Index(ctx, root)
+	g, err := (indexer.Builtin{}).Index(ctx, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	added, err := EnrichGo(ctx, root, g)
+	added, err := precision.EnrichGo(ctx, root, g)
 	if err != nil {
 		t.Fatalf("EnrichGo: %v", err)
 	}
@@ -121,11 +125,11 @@ func TestEnrichGoNoopOutsideModule(t *testing.T) {
 	root := t.TempDir() // .go files but no go.mod anywhere above
 	writeGoFile(t, root, "app.go", "package app\n\nfunc Run() int { return 1 }\n")
 	ctx := context.Background()
-	g, err := (Builtin{}).Index(ctx, root)
+	g, err := (indexer.Builtin{}).Index(ctx, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	added, err := EnrichGo(ctx, root, g)
+	added, err := precision.EnrichGo(ctx, root, g)
 	if err != nil {
 		t.Fatalf("EnrichGo should never error, got %v", err)
 	}

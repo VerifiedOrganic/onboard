@@ -47,15 +47,20 @@ import (
 	"github.com/odvcencio/gotreesitter/grammars"
 )
 
-// hclEngine bundles the parser with its language so node types can be decoded.
+// HCLEngine bundles the parser with its language so node types can be decoded.
 // One engine is built lazily per index run and reused across files (grammar
 // decompression is expensive).
-type hclEngine struct {
+type HCLEngine struct {
 	parser *ts.Parser
 	lang   *ts.Language
 }
 
-func newHCLEngine() *hclEngine {
+// NewHCLEngine constructs a reusable HCL parser engine, or nil when unavailable.
+func NewHCLEngine() *HCLEngine {
+	return newHCLEngine()
+}
+
+func newHCLEngine() *HCLEngine {
 	entry := grammars.DetectLanguageByName("hcl")
 	if entry == nil {
 		return nil
@@ -64,7 +69,7 @@ func newHCLEngine() *hclEngine {
 	if lang == nil {
 		return nil
 	}
-	return &hclEngine{parser: ts.NewParser(lang), lang: lang}
+	return &HCLEngine{parser: ts.NewParser(lang), lang: lang}
 }
 
 // hclExts are the file extensions resolved with HCL scoping rules. .tofu and
@@ -76,6 +81,11 @@ var hclExts = map[string]bool{
 	".hcl":      true,
 	".tofu":     true,
 	".tofuvars": true,
+}
+
+// IsHCLFile reports whether file uses HCL scoping rules.
+func IsHCLFile(file string) bool {
+	return isHCLFile(file)
 }
 
 func isHCLFile(file string) bool {
@@ -105,7 +115,7 @@ var tgConfigBlocks = map[string]bool{
 
 // safeParseHCL parses src, swallowing any input-dependent panic so one
 // pathological file cannot abort indexing (same contract as safeTag).
-func (e *hclEngine) safeParse(src []byte) (tree *ts.Tree) {
+func (e *HCLEngine) safeParse(src []byte) (tree *ts.Tree) {
 	defer func() {
 		if recover() != nil {
 			tree = nil
@@ -118,11 +128,13 @@ func (e *hclEngine) safeParse(src []byte) (tree *ts.Tree) {
 	return t
 }
 
-// tagHCLFile extracts definitions, raw references, and cross-module import
-// targets from one HCL file. root is the absolute repo root (used to resolve
-// module sources and find_in_parent_folders against the filesystem); rel is the
-// slash-separated repo-relative path.
-func tagHCLFile(root, rel string, src []byte, eng *hclEngine) ([]*Symbol, []rawRef, map[string]resolvedImport) {
+// TagHCLFile extracts definitions, references, and imports from one HCL file.
+// root is the absolute repo root; rel is the slash-separated repo-relative path.
+func TagHCLFile(root, rel string, src []byte, eng *HCLEngine) ([]*Symbol, []RawRef, map[string]ResolvedImport) {
+	return tagHCLFile(root, rel, src, eng)
+}
+
+func tagHCLFile(root, rel string, src []byte, eng *HCLEngine) ([]*Symbol, []RawRef, map[string]ResolvedImport) {
 	tree := eng.safeParse(src)
 	if tree == nil {
 		return nil, nil, nil
@@ -135,7 +147,7 @@ func tagHCLFile(root, rel string, src []byte, eng *hclEngine) ([]*Symbol, []rawR
 		src:     src,
 		lang:    eng.lang,
 		local:   map[string]*Symbol{},
-		imports: map[string]resolvedImport{},
+		imports: map[string]ResolvedImport{},
 	}
 
 	rootNode := tree.RootNode()
@@ -177,8 +189,8 @@ type hclWalker struct {
 	local   map[string]*Symbol
 	defs    []*Symbol
 	spans   []defSpan
-	refs    []rawRef
-	imports map[string]resolvedImport
+	refs    []RawRef
+	imports map[string]ResolvedImport
 	fileDef *Symbol // terragrunt stack/config-layer symbol spanning the file
 }
 
@@ -245,7 +257,7 @@ func (w *hclWalker) topBlock(block *ts.Node) {
 			modDef := w.addDef("module."+name, "module_call", block, false)
 			if src := blockStringAttr(block, w.lang, w.src, "source"); src != "" {
 				if dir, ok := resolveHCLSourceDir(w.root, w.rel, src); ok {
-					w.imports["module."+name] = resolvedImport{targetFile: dir, targetName: "dir"}
+					w.imports["module."+name] = ResolvedImport{TargetFile: dir, TargetName: "dir"}
 				}
 			}
 			if body := firstNamedChildOfType(block, w.lang, "body"); body != nil {
@@ -257,11 +269,11 @@ func (w *hclWalker) topBlock(block *ts.Node) {
 					if key == "" || hclModuleMetaArgs[key] {
 						continue
 					}
-					w.refs = append(w.refs, rawRef{
-						callerQName: modDef.QName,
-						callerFile:  w.rel,
-						calleeName:  "var." + key,
-						calleeRecv:  "hcl-module:" + name,
+					w.refs = append(w.refs, RawRef{
+						CallerQName: modDef.QName,
+						CallerFile:  w.rel,
+						CalleeName:  "var." + key,
+						CalleeRecv:  "hcl-module:" + name,
 					})
 				}
 			}
@@ -289,11 +301,11 @@ func (w *hclWalker) topBlock(block *ts.Node) {
 						stackName = "stack"
 					}
 					key := "dependency." + labels[0]
-					w.imports[key] = resolvedImport{targetFile: target, targetName: stackName}
-					w.refs = append(w.refs, rawRef{
-						callerQName: dep.QName,
-						callerFile:  w.rel,
-						calleeRecv:  "hcl-import:" + key,
+					w.imports[key] = ResolvedImport{TargetFile: target, TargetName: stackName}
+					w.refs = append(w.refs, RawRef{
+						CallerQName: dep.QName,
+						CallerFile:  w.rel,
+						CalleeRecv:  "hcl-import:" + key,
 					})
 				}
 			}
@@ -308,14 +320,14 @@ func (w *hclWalker) topBlock(block *ts.Node) {
 		}
 		if target := w.resolveIncludePath(block); target != "" {
 			key := "include." + name
-			w.imports[key] = resolvedImport{
-				targetFile: target,
-				targetName: strings.TrimSuffix(path.Base(target), ".hcl"),
+			w.imports[key] = ResolvedImport{
+				TargetFile: target,
+				TargetName: strings.TrimSuffix(path.Base(target), ".hcl"),
 			}
-			w.refs = append(w.refs, rawRef{
-				callerQName: w.fileDef.QName,
-				callerFile:  w.rel,
-				calleeRecv:  "hcl-import:" + key,
+			w.refs = append(w.refs, RawRef{
+				CallerQName: w.fileDef.QName,
+				CallerFile:  w.rel,
+				CalleeRecv:  "hcl-import:" + key,
 			})
 		}
 	case "terraform":
@@ -326,7 +338,7 @@ func (w *hclWalker) topBlock(block *ts.Node) {
 		}
 		if src := blockStringAttr(block, w.lang, w.src, "source"); src != "" {
 			if dir, ok := resolveHCLSourceDir(w.root, w.rel, src); ok {
-				w.imports["terraform.source"] = resolvedImport{targetFile: dir, targetName: "dir"}
+				w.imports["terraform.source"] = ResolvedImport{TargetFile: dir, TargetName: "dir"}
 			}
 		}
 	}
@@ -342,21 +354,21 @@ func (w *hclWalker) topAttribute(attr *ts.Node) {
 	}
 	ext := strings.ToLower(path.Ext(w.rel))
 	if ext == ".tfvars" || ext == ".tofuvars" {
-		w.refs = append(w.refs, rawRef{
-			callerQName: w.rel + "::(top-level)",
-			callerFile:  w.rel,
-			calleeName:  "var." + name,
+		w.refs = append(w.refs, RawRef{
+			CallerQName: w.rel + "::(top-level)",
+			CallerFile:  w.rel,
+			CalleeName:  "var." + name,
 		})
 		return
 	}
 	if name == "inputs" && w.fileDef != nil {
 		caller := w.fileDef.QName
 		for _, key := range objectKeys(attr, w.lang, w.src) {
-			w.refs = append(w.refs, rawRef{
-				callerQName: caller,
-				callerFile:  w.rel,
-				calleeName:  "var." + key,
-				calleeRecv:  "hcl-tgsource",
+			w.refs = append(w.refs, RawRef{
+				CallerQName: caller,
+				CallerFile:  w.rel,
+				CalleeName:  "var." + key,
+				CalleeRecv:  "hcl-tgsource",
 			})
 		}
 	}
@@ -449,11 +461,11 @@ func (w *hclWalker) refFromTraversal(varExpr *ts.Node) {
 		caller = w.rel + "::(top-level)"
 	}
 	add := func(name, recv string) {
-		w.refs = append(w.refs, rawRef{
-			callerQName: caller,
-			callerFile:  w.rel,
-			calleeName:  name,
-			calleeRecv:  recv,
+		w.refs = append(w.refs, RawRef{
+			CallerQName: caller,
+			CallerFile:  w.rel,
+			CalleeName:  name,
+			CalleeRecv:  recv,
 		})
 	}
 
@@ -495,44 +507,44 @@ func (w *hclWalker) refFromTraversal(varExpr *ts.Node) {
 	}
 }
 
-// lookupHCL resolves an HCL reference. Scoping is Terraform's own: same file,
+// LookupHCL resolves an HCL reference. Scoping is Terraform's own: same file,
 // then same directory (module). There is deliberately no global by-name
 // fallback — see the package comment.
-func (r rawRef) lookupHCL(byFileName, byDirName map[string][]string, fileImports map[string]map[string]resolvedImport) string {
-	imports := fileImports[r.callerFile]
+func (r RawRef) LookupHCL(byFileName, byDirName map[string][]string, fileImports map[string]map[string]ResolvedImport) string {
+	imports := fileImports[r.CallerFile]
 	switch {
-	case strings.HasPrefix(r.calleeRecv, "hcl-import:"):
-		imp, ok := imports[strings.TrimPrefix(r.calleeRecv, "hcl-import:")]
+	case strings.HasPrefix(r.CalleeRecv, "hcl-import:"):
+		imp, ok := imports[strings.TrimPrefix(r.CalleeRecv, "hcl-import:")]
 		if !ok {
 			return ""
 		}
-		if cands := byFileName[imp.targetFile+"\x00"+imp.targetName]; len(cands) == 1 {
+		if cands := byFileName[imp.TargetFile+"\x00"+imp.TargetName]; len(cands) == 1 {
 			return cands[0]
 		}
 		return ""
-	case strings.HasPrefix(r.calleeRecv, "hcl-module:"):
-		imp, ok := imports["module."+strings.TrimPrefix(r.calleeRecv, "hcl-module:")]
+	case strings.HasPrefix(r.CalleeRecv, "hcl-module:"):
+		imp, ok := imports["module."+strings.TrimPrefix(r.CalleeRecv, "hcl-module:")]
 		if !ok {
 			return ""
 		}
-		if cands := byDirName[imp.targetFile+"\x00"+r.calleeName]; len(cands) == 1 {
+		if cands := byDirName[imp.TargetFile+"\x00"+r.CalleeName]; len(cands) == 1 {
 			return cands[0]
 		}
 		return ""
-	case r.calleeRecv == "hcl-tgsource":
+	case r.CalleeRecv == "hcl-tgsource":
 		imp, ok := imports["terraform.source"]
 		if !ok {
 			return ""
 		}
-		if cands := byDirName[imp.targetFile+"\x00"+r.calleeName]; len(cands) == 1 {
+		if cands := byDirName[imp.TargetFile+"\x00"+r.CalleeName]; len(cands) == 1 {
 			return cands[0]
 		}
 		return ""
 	}
-	if cands := byFileName[r.callerFile+"\x00"+r.calleeName]; len(cands) == 1 {
+	if cands := byFileName[r.CallerFile+"\x00"+r.CalleeName]; len(cands) == 1 {
 		return cands[0]
 	}
-	if cands := byDirName[dirOf(r.callerFile)+"\x00"+r.calleeName]; len(cands) == 1 {
+	if cands := byDirName[DirOf(r.CallerFile)+"\x00"+r.CalleeName]; len(cands) == 1 {
 		return cands[0]
 	}
 	return ""

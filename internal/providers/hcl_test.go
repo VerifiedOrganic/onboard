@@ -1,10 +1,13 @@
-package providers
+package providers_test
 
 import (
 	"context"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/indexer"
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
 // writeHCLFixture lays out a miniature Terragrunt repo modeled on a real
@@ -126,9 +129,9 @@ inputs = {
 	write(t, root, "environments/_local/example.tfvars", "")
 }
 
-func indexHCL(t *testing.T, root string) *Graph {
+func indexHCL(t *testing.T, root string) *providers.Graph {
 	t.Helper()
-	g, err := Builtin{}.Index(context.Background(), root)
+	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,16 +274,16 @@ func TestHCLCacheRoundTrip(t *testing.T) {
 	writeHCLFixture(t, root)
 	cachePath := root + "/.cache.json"
 
-	g1, err := Builtin{}.IndexWithCache(context.Background(), root, cachePath)
+	g1, err := indexer.Builtin{}.IndexWithCache(context.Background(), root, cachePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	g2, err := Builtin{}.IndexWithCache(context.Background(), root, cachePath)
+	g2, err := indexer.Builtin{}.IndexWithCache(context.Background(), root, cachePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g2.reused == 0 {
-		t.Fatalf("second index reused no files (reused=%d retagged=%d)", g2.reused, g2.retagged)
+	if g2.Reused == 0 {
+		t.Fatalf("second index reused no files (reused=%d retagged=%d)", g2.Reused, g2.Retagged)
 	}
 	if len(g1.Defs) != len(g2.Defs) {
 		t.Errorf("defs differ across cache round-trip: %d vs %d", len(g1.Defs), len(g2.Defs))

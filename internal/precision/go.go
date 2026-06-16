@@ -1,4 +1,5 @@
-package providers
+// Package precision enriches code graphs with type-checked semantic call edges.
+package precision
 
 import (
 	"context"
@@ -7,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +16,8 @@ import (
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
+
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
 // The Go precision layer is the optional, capability-gated upgrade from the syntactic
@@ -39,12 +41,12 @@ const goPrecisionTimeout = 90 * time.Second
 // strictly additive — it adds and marks edges, never removes syntactic ones — and entirely
 // non-fatal: any missing capability, load error, or analysis panic leaves g untouched and
 // returns (0, nil). Callers treat a precise result as a strict upgrade when present.
-func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
+func EnrichGo(ctx context.Context, root string, g *providers.Graph) (int, error) {
 	if g == nil || len(g.Defs) == 0 {
 		return 0, nil
 	}
 	if !goAvailable(root) {
-		if graphHasLang(g, "go") {
+		if providers.GraphHasLang(g, "go") {
 			g.AddPrecisionNote("Go precision unavailable: `go` command or go.mod not found")
 		}
 		return 0, nil
@@ -78,7 +80,7 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 			continue
 		}
 		f := filepath.ToSlash(s.File)
-		byPos[posKey(f, s.Line, s.Name)] = q
+		byPos[providers.PosKey(f, s.Line, s.Name)] = q
 		byFileName[f+"\x00"+s.Name] = append(byFileName[f+"\x00"+s.Name], q)
 	}
 	resolve := func(absFile string, line int, name string) (string, bool) {
@@ -87,7 +89,7 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 			return "", false
 		}
 		f := filepath.ToSlash(rel)
-		if q, ok := byPos[posKey(f, line, name)]; ok {
+		if q, ok := byPos[providers.PosKey(f, line, name)]; ok {
 			return q, true
 		}
 		if qs := byFileName[f+"\x00"+name]; len(qs) == 1 { // unambiguous fallback only
@@ -99,7 +101,7 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 	if g.ProvenEdges == nil {
 		g.ProvenEdges = map[string]bool{}
 	}
-	edgesSeen := edgeSetFromGraph(g)
+	edgesSeen := providers.EdgeSetFromGraph(g)
 	added := 0
 	proved := false
 	for _, e := range edges {
@@ -111,13 +113,13 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 		if !ok || caller == callee {
 			continue
 		}
-		key := edgeKey(caller, callee)
+		key := providers.EdgeKey(caller, callee)
 		if g.ProvenEdges[key] {
 			continue
 		}
 		proved = true
 		g.ProvenEdges[key] = true
-		if edgesSeen.add(g, caller, callee) {
+		if edgesSeen.Add(g, caller, callee) {
 			added++
 		}
 	}
@@ -136,10 +138,6 @@ type posEdge struct {
 	calleeFile string
 	calleeLine int
 	calleeName string
-}
-
-func posKey(slashFile string, line int, name string) string {
-	return slashFile + "\x00" + strconv.Itoa(line) + "\x00" + name
 }
 
 // goPreciseEdges loads the module under root, builds SSA, and returns its type-checked call

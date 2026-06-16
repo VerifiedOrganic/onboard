@@ -9,6 +9,8 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/VerifiedOrganic/onboard/internal/git"
+	"github.com/VerifiedOrganic/onboard/internal/indexer"
+	"github.com/VerifiedOrganic/onboard/internal/precision"
 	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
@@ -49,20 +51,20 @@ func (s *Service) Index(ctx context.Context, root string, refresh, precise bool)
 				return g, nil
 			}
 		}
-		g, err := (providers.Builtin{}).IndexWithCache(ctx, root, diskCachePath(root))
+		g, err := (indexer.Builtin{}).IndexWithCache(ctx, root, diskCachePath(root))
 		if err != nil {
 			return nil, err
 		}
 		if g.Files == 0 {
-			if ng, nerr := (providers.Null{}).Index(ctx, root); nerr == nil && len(ng.Defs) > 0 {
+			if ng, nerr := (indexer.Null{}).Index(ctx, root); nerr == nil && len(ng.Defs) > 0 {
 				g = ng
 			}
 		}
 		if precise {
-			if _, err := providers.EnrichGo(ctx, root, g); err != nil && s.logger != nil {
+			if _, err := precision.EnrichGo(ctx, root, g); err != nil && s.logger != nil {
 				s.logger.Warn("go precision enrichment failed", "root", root, "err", err)
 			}
-			if _, err := providers.EnrichRust(ctx, root, g); err != nil && s.logger != nil {
+			if _, err := precision.EnrichRust(ctx, root, g); err != nil && s.logger != nil {
 				s.logger.Warn("rust precision enrichment failed", "root", root, "err", err)
 			}
 		}

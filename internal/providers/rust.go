@@ -5,11 +5,11 @@ import (
 	"unicode"
 )
 
-// rustTagsQuery is an explicit tree-sitter tags query for Rust. The generic inferred query
+// RustTagsQuery is an explicit tree-sitter tags query for Rust. The generic inferred query
 // misses method calls via field_expression (self.foo(), obj.bar()) because it only matches
 // field_identifier as a direct child of call_expression, but Rust nests it inside
 // field_expression. This query also captures modules, macros, constants, and type aliases.
-const rustTagsQuery = `
+const RustTagsQuery = `
 ; Definitions
 (function_item (identifier) @name) @definition.function
 (function_signature_item (identifier) @name) @definition.function
@@ -29,10 +29,12 @@ const rustTagsQuery = `
 (macro_invocation (identifier) @name) @reference.call
 `
 
-// rustOwner returns the nearest enclosing impl/trait owner at nameStart, if any. It is a
-// lightweight source scan layered on top of tree-sitter tags: the tagger already identified
-// the definition, but Rust's tags do not consistently attach the impl/trait container. This
-// keeps symbol display useful without turning the universal provider into a Rust parser.
+// RustOwner returns the nearest enclosing impl/trait owner at nameStart, if any.
+// It is a lightweight source scan layered on top of tree-sitter tags.
+func RustOwner(src []byte, nameStart uint32) string {
+	return rustOwner(src, nameStart)
+}
+
 func rustOwner(src []byte, nameStart uint32) string {
 	limit := int(nameStart)
 	if limit <= 0 || limit > len(src) {
@@ -69,9 +71,12 @@ func rustOwner(src []byte, nameStart uint32) string {
 	return bestOwner
 }
 
-// rustDefinitionIsTest marks Rust unit-test functions whose file path often looks like
-// normal production code (src/lib.rs). It intentionally accepts the common async-test
-// attribute forms too: #[tokio::test], #[async_std::test], and similar.
+// RustDefinitionIsTest marks Rust unit-test functions behind #[test] / #[cfg(test)].
+// It also accepts common async-test attribute forms (#[tokio::test], etc.).
+func RustDefinitionIsTest(src []byte, declStart uint32) bool {
+	return rustDefinitionIsTest(src, declStart)
+}
+
 func rustDefinitionIsTest(src []byte, declStart uint32) bool {
 	start := int(declStart)
 	if start < 0 || start > len(src) {
@@ -87,12 +92,22 @@ func rustDefinitionIsTest(src []byte, declStart uint32) bool {
 		strings.Contains(prefix, "#[cfg(test)]")
 }
 
+// RustDefinitionIsPublic reports whether a Rust definition is marked pub.
+func RustDefinitionIsPublic(src []byte, declStart, nameStart uint32) bool {
+	return rustDefinitionIsPublic(src, declStart, nameStart)
+}
+
 func rustDefinitionIsPublic(src []byte, declStart, nameStart uint32) bool {
 	if int(declStart) > len(src) || int(nameStart) > len(src) || declStart >= nameStart {
 		return false
 	}
 	header := strings.TrimSpace(collapseSpace(string(src[declStart:nameStart])))
 	return strings.HasPrefix(header, "pub ") || strings.HasPrefix(header, "pub(")
+}
+
+// RustRefHint extracts receiver hints for a Rust call reference.
+func RustRefHint(src []byte, tagStart, nameStart uint32, caller *Symbol) (recv string, allowBare bool) {
+	return rustRefHint(src, tagStart, nameStart, caller)
 }
 
 func rustRefHint(src []byte, tagStart, nameStart uint32, caller *Symbol) (recv string, allowBare bool) {
