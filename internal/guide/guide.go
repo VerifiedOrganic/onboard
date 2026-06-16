@@ -71,9 +71,32 @@ func Write(root, body, mode string, now time.Time) (string, error) {
 	h.SHA, _ = git.HeadSHA(root) // empty if not a git repo; that's fine
 	h.Branch, _ = git.Branch(root)
 	content := format(h) + "\n\n" + strings.TrimLeft(body, "\n")
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(p), fileName+".*.tmp")
+	if err != nil {
 		return "", err
 	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmpPath, p); err != nil {
+		return "", err
+	}
+	cleanup = false
 	return p, nil
 }
 

@@ -126,8 +126,8 @@ func TestParseNameStatusZ(t *testing.T) {
 	}
 	want := []Change{
 		{Status: "M", Path: "space name.txt"},
-		{Status: "R100", Path: "new name.go"},
-		{Status: "C75", Path: "new copy.go"},
+		{Status: "R100", Path: "new name.go", OldPath: "old name.go"},
+		{Status: "C75", Path: "new copy.go", OldPath: "old copy.go"},
 	}
 	for i := range want {
 		if changes[i] != want[i] {

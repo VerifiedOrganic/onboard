@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -97,6 +98,20 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 		return out, err
 	}
 	out.Provider = g.Provider
+	deletions := false
+	for _, d := range diffs {
+		if d.Status == "D" {
+			deletions = true
+			break
+		}
+	}
+	var baseGraph *providers.Graph
+	if deletions {
+		baseGraph, err = diffBaseGraph(ctx, root, base, in.Precise)
+		if err != nil {
+			return out, err
+		}
+	}
 
 	// Group definitions by file, sorted by line, so each symbol's body extent can be
 	// approximated as [line, nextSymbolLine) for attributing changed lines.
@@ -112,24 +127,26 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 	impactedUnion := map[string]bool{}
 	atRiskTests := map[string]bool{}
 	for _, d := range diffs {
-		if d.Status == "D" || len(d.Hunks) == 0 {
-			continue // deletions have no current symbols to attribute to
+		if d.Status == "D" {
+			if baseGraph == nil {
+				continue
+			}
+			for _, sym := range deletedFileSymbols(baseGraph, d.Path) {
+				if !reviewableKinds[sym.Kind] {
+					continue
+				}
+				addChangedSymbol(&out, baseGraph, sym, impactedUnion, atRiskTests)
+			}
+			continue
+		}
+		if len(d.Hunks) == 0 {
+			continue
 		}
 		for _, sym := range touchedSymbols(defsByFile[filepath.ToSlash(d.Path)], d.Hunks) {
 			if !reviewableKinds[sym.Kind] {
 				continue
 			}
-			trans := g.Impact(sym.QName)
-			for _, q := range trans {
-				impactedUnion[q] = true
-				if isTestQName(q, g) {
-					atRiskTests[q] = true
-				}
-			}
-			out.ChangedSymbols = append(out.ChangedSymbols, changedSymbol{
-				QName: sym.QName, Symbol: sym.Display(), File: sym.File, Line: sym.Line,
-				Kind: sym.Kind, DirectCallers: len(g.Callers(sym.QName)), ImpactedCount: len(trans),
-			})
+			addChangedSymbol(&out, g, sym, impactedUnion, atRiskTests)
 		}
 	}
 
@@ -156,13 +173,68 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 
 	out.AtRiskTests = sortedSet(atRiskTests)
 	out.ImpactedCount = len(impactedUnion)
-	out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol. Blast radius via the call graph: " +
+	deletionNote := ""
+	if deletions {
+		deletionNote = " Deleted files are analyzed against the base tree, because their symbols no longer exist in the working tree."
+	}
+	out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol." + deletionNote + " Blast radius via the call graph: " +
 		edgeCaveat(g) + goPrecisionHint(g, in.Precise)
 	if in.Precise && !g.Precise {
-		out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol. Blast radius via the call graph: " +
+		out.Note = "Changed symbols are attributed by line range (a symbol spans from its declaration to the next one), so a change in a file's preamble may not map to any symbol." + deletionNote + " Blast radius via the call graph: " +
 			semanticPrecisionUnavailableNote() + edgeCaveat(g)
 	}
 	return out, nil
+}
+
+func diffBaseGraph(ctx context.Context, root, base string, precise bool) (*providers.Graph, error) {
+	tmp, err := os.MkdirTemp("", "onboard-base-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	if err := git.ArchiveTree(ctx, root, base, tmp); err != nil {
+		return nil, err
+	}
+	g, err := (providers.Builtin{}).Index(ctx, tmp)
+	if err != nil {
+		return nil, err
+	}
+	if g.Files == 0 {
+		if ng, nerr := (providers.Null{}).Index(ctx, tmp); nerr == nil && len(ng.Defs) > 0 {
+			g = ng
+		}
+	}
+	if precise {
+		_, _ = providers.EnrichGo(ctx, tmp, g)
+		_, _ = providers.EnrichRust(ctx, tmp, g)
+	}
+	return g, nil
+}
+
+func deletedFileSymbols(g *providers.Graph, path string) []*providers.Symbol {
+	slashed := filepath.ToSlash(path)
+	var out []*providers.Symbol
+	for _, sym := range g.Defs {
+		if filepath.ToSlash(sym.File) == slashed {
+			out = append(out, sym)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Line < out[j].Line })
+	return out
+}
+
+func addChangedSymbol(out *explainDiffOutput, g *providers.Graph, sym *providers.Symbol, impactedUnion, atRiskTests map[string]bool) {
+	trans := g.Impact(sym.QName)
+	for _, q := range trans {
+		impactedUnion[q] = true
+		if isTestQName(q, g) {
+			atRiskTests[q] = true
+		}
+	}
+	out.ChangedSymbols = append(out.ChangedSymbols, changedSymbol{
+		QName: sym.QName, Symbol: sym.Display(), File: sym.File, Line: sym.Line,
+		Kind: sym.Kind, DirectCallers: len(g.Callers(sym.QName)), ImpactedCount: len(trans),
+	})
 }
 
 // touchedSymbols returns the definitions in fileDefs (sorted by line) whose extent overlaps

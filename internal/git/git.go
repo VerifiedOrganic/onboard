@@ -4,13 +4,20 @@
 package git
 
 import (
+	"archive/tar"
+	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
+
+const gitCommandTimeout = 30 * time.Second
 
 // Available reports whether git is on PATH and root is inside a work tree.
 func Available(root string) bool {
@@ -49,8 +56,9 @@ func Branch(root string) (string, error) {
 
 // Change is one entry from `git diff --name-status`.
 type Change struct {
-	Status string `json:"status"` // A, M, D, Rxxx, ...
-	Path   string `json:"path"`
+	Status  string `json:"status"` // A, M, D, Rxxx, ...
+	Path    string `json:"path"`   // current/new path
+	OldPath string `json:"old_path,omitempty"`
 }
 
 // DiffNameStatus returns the files changed from fromSHA to HEAD.
@@ -76,15 +84,17 @@ func parseNameStatusZ(out string) []Change {
 		}
 		path := fields[i]
 		i++
-		// Rename/copy records are status, old path, new path. Keep the new path.
+		oldPath := ""
+		// Rename/copy records are status, old path, new path. Keep both.
 		if strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C") {
+			oldPath = path
 			if i >= len(fields) {
 				break
 			}
 			path = fields[i]
 			i++
 		}
-		changes = append(changes, Change{Status: status, Path: path})
+		changes = append(changes, Change{Status: status, Path: path, OldPath: oldPath})
 	}
 	return changes
 }
@@ -112,6 +122,66 @@ func Diff(root, base string) ([]FileDiff, error) {
 		return nil, err
 	}
 	return parseUnifiedDiff(out), nil
+}
+
+// ArchiveTree materializes ref into dst using `git archive`. It is intended for read-only
+// analysis of base-side state, such as computing the blast radius of deleted symbols.
+func ArchiveTree(ctx context.Context, root, ref, dst string) error {
+	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", ref)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	tr := tar.NewReader(stdout)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = cmd.Wait()
+			return err
+		}
+		name := filepath.Clean(filepath.FromSlash(hdr.Name))
+		if name == "." || name == ".." || filepath.IsAbs(name) || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
+			_ = cmd.Wait()
+			return fmt.Errorf("git archive contained unsafe path %q", hdr.Name)
+		}
+		target := filepath.Join(dst, name)
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o700); err != nil {
+				_ = cmd.Wait()
+				return err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				_ = cmd.Wait()
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode).Perm())
+			if err != nil {
+				_ = cmd.Wait()
+				return err
+			}
+			_, copyErr := io.Copy(f, tr)
+			closeErr := f.Close()
+			if copyErr != nil {
+				_ = cmd.Wait()
+				return copyErr
+			}
+			if closeErr != nil {
+				_ = cmd.Wait()
+				return closeErr
+			}
+		}
+	}
+	return cmd.Wait()
 }
 
 // parseUnifiedDiff parses `git diff --unified=0` output into per-file changes. It is a
@@ -336,7 +406,12 @@ func renameTarget(p string) string {
 
 func run(root string, args ...string) (string, error) {
 	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	out, err := cmd.Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		return string(out), fmt.Errorf("git %s timed out after %s", strings.Join(args, " "), gitCommandTimeout)
+	}
 	return string(out), err
 }

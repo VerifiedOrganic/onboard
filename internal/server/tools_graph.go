@@ -44,7 +44,7 @@ type traceFlowOutput struct {
 }
 
 func traceFlow(ctx context.Context, in traceFlowInput) (traceFlowOutput, error) {
-	out := traceFlowOutput{Entry: in.Entry}
+	out := traceFlowOutput{Entry: in.Entry, Candidates: []string{}, Nodes: []traceNode{}}
 	depth := in.Depth
 	if depth <= 0 {
 		depth = 4
@@ -136,7 +136,7 @@ func traceFlow(ctx context.Context, in traceFlowInput) (traceFlowOutput, error) 
 // edge (where both ends are in the trace) becomes a message, in breadth-first discovery order.
 // That order reflects reachability, not strict runtime sequencing — a serviceable approximation
 // the note flags. Participants are the short symbol names, so same-named symbols in different
-// files collapse onto one lifeline.
+// files stay on distinct lifelines while still displaying readable labels.
 func renderSequence(nodes []traceNode, g *providers.Graph) string {
 	inSet := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
@@ -155,16 +155,17 @@ func renderSequence(nodes []traceNode, g *providers.Graph) string {
 	b.WriteString("sequenceDiagram\n")
 	declared := map[string]bool{}
 	for _, n := range nodes {
-		if name := seqToken(short(n.QName)); !declared[name] {
-			declared[name] = true
-			b.WriteString("  participant " + name + "\n")
+		id := seqToken(n.QName)
+		if !declared[id] {
+			declared[id] = true
+			b.WriteString("  participant " + id + " as " + short(n.QName) + "\n")
 		}
 	}
 	for _, n := range nodes {
-		from := seqToken(short(n.QName))
+		from := seqToken(n.QName)
 		for _, callee := range n.Callees {
 			if inSet[callee] {
-				b.WriteString("  " + from + "->>" + seqToken(short(callee)) + ": " + short(callee) + "\n")
+				b.WriteString("  " + from + "->>" + seqToken(callee) + ": " + short(callee) + "\n")
 			}
 		}
 	}
@@ -181,6 +182,9 @@ func seqToken(s string) string {
 	}, s)
 	if t == "" {
 		return "_"
+	}
+	if t[0] >= '0' && t[0] <= '9' {
+		return "p_" + t
 	}
 	return t
 }
@@ -207,7 +211,13 @@ type impactOutput struct {
 }
 
 func impactAnalysis(ctx context.Context, in impactInput) (impactOutput, error) {
-	out := impactOutput{Symbol: in.Symbol}
+	out := impactOutput{
+		Symbol:            in.Symbol,
+		Candidates:        []string{},
+		DirectCallers:     []string{},
+		TransitiveCallers: []string{},
+		AtRiskTests:       []string{},
+	}
 	root, err := resolveRoot(in.Root)
 	if err != nil {
 		return out, err

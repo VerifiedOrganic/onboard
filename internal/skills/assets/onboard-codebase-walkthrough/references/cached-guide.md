@@ -1,36 +1,44 @@
-# Cached guide mode
+# Cached Guide Mode
 
-Produce a durable markdown guide and cache it, so future sessions start at full speed instead of re-discovering the codebase. Inspired by the `/onboard` caching pattern: scan once, cache tagged with the git HEAD SHA, delta-update later.
+Produce a durable markdown guide through onboard's guide tools, so future sessions start
+from the cached understanding instead of rediscovering the codebase.
 
-## Cache location and tagging
-Write the guide to `<git-common-dir>/codebase-walkthrough.md` (resolve with `git rev-parse --git-common-dir`; falls back to `.git/`). This keeps it out of the working tree so it isn't accidentally committed.
+## Tool Contract
 
-Tag the top of the file with a machine-readable header:
+Use the MCP tools when they are available:
 
-```markdown
-<!-- walkthrough-cache
-sha: <current HEAD sha, from `git rev-parse HEAD`>
-branch: <from `git rev-parse --abbrev-ref HEAD`>
-generated: <ISO timestamp>
-mode: full | delta
--->
-```
+- `onboard:guide_read(root?)` — check whether a cached guide exists and whether its SHA
+  matches HEAD.
+- `onboard:guide_write(root?, body, mode)` — write the full guide body; the tool stamps the
+  cache header automatically.
+- `onboard:guide_delta(root?)` — for an existing stale guide, list changed files since the
+  cached SHA so a maintainer can update only affected sections.
 
-## Run logic
-1. **No cache exists** → full scan. Run Phases 1–5 from SKILL.md, write the guide, stamp the header.
-2. **Cache exists, SHA matches HEAD** → load it directly into the conversation. No rescan. Tell the user it's cached and current.
-3. **Cache exists, SHA differs** → delta update. Run `git diff --name-status <cached-sha> HEAD`, read only added/modified files, note deletions, update the affected sections, restamp the header with the new SHA and `mode: delta`. Don't rescan unchanged subtrees.
+Do not hand-write the `<!-- walkthrough-cache ... -->` header. `guide_write` owns it. The
+body you pass starts at the guide title.
 
-If the repo has no git history, skip caching and just produce the guide inline, noting that delta-updates aren't available.
+## Run Logic
 
-## Guide structure
+1. Call `onboard:guide_read`.
+2. If `exists: true` and `current: true`, load the returned `body` into the conversation
+   and tell the user the guide is current. Do not rescan.
+3. If no guide exists, run the full walkthrough phases from `SKILL.md`, assemble the guide
+   body, and call `onboard:guide_write` with `mode: "full"`.
+4. If a guide exists but is stale, prefer handing off to `onboard-guide-maintainer`; that
+   skill owns the delta loop. If the user explicitly asked for a fresh guide, regenerate
+   and call `onboard:guide_write` with `mode: "full"`.
+5. If the repo has no git history, produce the guide inline and explain that SHA-tagged
+   delta updates are unavailable.
+
+## Guide Structure
+
 Use this template:
 
 ```markdown
 # Codebase Guide: [Project Name]
 
 ## Overview
-[2–3 sentences: what this does and for whom]
+[2-3 sentences: what this does and for whom]
 
 ## Tech Stack
 [table: layer | technology | version — detected, not assumed]
@@ -39,10 +47,10 @@ Use this template:
 [pattern + a Mermaid or ASCII sketch of how components connect]
 
 ## Key Entry Points
-[path → what enters here]
+[path -> what enters here]
 
 ## Directory Map
-[top-level dir → purpose; skip the obvious]
+[top-level dir -> purpose; skip the obvious]
 
 ## Behavioral Map (from tests)
 [what the system claims to do, by domain]
@@ -66,7 +74,11 @@ Use this template:
 [detected dev/test/build/lint/migrate commands]
 ```
 
-Keep it scannable in a couple of minutes — depth belongs in the code, not the guide. Don't copy the README; this adds structural insight the README lacks.
+Keep it scannable in a couple of minutes. Do not copy the README; this guide should add
+structural insight the README lacks.
 
-## Optional companion: starter CLAUDE.md
-If the user also wants future agent sessions to start informed, offer to write/enhance a `CLAUDE.md` at the repo root from the detected conventions (stack, code style, test/build commands, structure). If one exists, read and enhance it — preserve existing instructions and mark what changed. Keep it under ~100 lines.
+## Optional Companion
+
+If the user also wants future agent sessions to start informed, offer to write or enhance a
+root `CLAUDE.md` from detected conventions, commands, and structure. If one exists, preserve
+existing instructions and edit only the parts this walkthrough established.

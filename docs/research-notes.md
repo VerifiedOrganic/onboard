@@ -11,7 +11,7 @@ adversarially checked, the verdict here incorporates the corrected facts.
 > **This is a point-in-time design-rationale archive, not the live API reference.** It
 > records the decisions and reasoning as of initial implementation. The codebase has since
 > grown — `repo_map`, `history`, `context_pack`, `deps`, `schema`, `routes`, `dead_code`,
-> and `explain_diff` (**17 tools** now), the shipped Go precision layer, churn-blended
+> `stacks`, and `explain_diff` (**18 tools** now), the shipped Go precision layer, churn-blended
 > ranking, same-package edge resolution, receiver-qualified methods, and the `doctor`
 > command — and skills were later wired to use those tools. Where a section's tool lists or
 > counts predate those additions, trust the code and the other docs
@@ -423,6 +423,9 @@ func main() {
 The MCP client connects with `&mcp.StreamableClientTransport{Endpoint:
 "http://host:8080/mcp"}` and the same `client.Connect(ctx, transport, nil)` flow.
 
+Current onboard docs use `127.0.0.1:8080` for local HTTP examples and require external
+auth/TLS/network controls for hosted or shared deployments; see [trust.md](trust.md).
+
 **Confidence:** high (signatures verified against pkg.go.dev and repo source
 `mcp/transport.go`, `mcp/streamable.go`, `mcp/protocol.go` for v1.6.x).
 
@@ -512,17 +515,15 @@ least-overlapping additions.
 - **Naming:** prefer gerunds for consistency (noun phrases acceptable); pick **one**
   convention before publishing — the current proposal mixes styles.
 
-### Open questions to resolve before publishing
+### Resolved follow-ups from the original research
 
-1. Are `recon`/`trace_flow`/`impact`/`render_map`/`guide` real first-class MCP
-   tools this server exposes, or capability shorthand? (Existing `SKILL.md`
-   references only glob/grep/read plus an optional code-graph MCP.)
-2. Pick one naming convention for the suite.
-3. Confirm interactive HTML stays in walkthrough while cartographer owns static
-   diagram-as-code (recommended).
-4. Should `onboard-guide-maintainer` and `onboard-dependency-impact-analyzer` **hard-require** the
-   code-graph MCP or degrade to grep? Blast radius via grep is unreliable on
-   AI-built code — recommend hard-require.
+1. `recon`, `trace_flow`, `impact`, `render_map`, and `guide_*` are first-class MCP tools
+   exposed by this server.
+2. The shipped suite uses namespaced `onboard-*` identifiers.
+3. Interactive HTML stays with `onboard-codebase-walkthrough`; durable committable
+   Mermaid diagrams belong to `onboard-architecture-cartographer`.
+4. Guide maintenance and dependency impact workflows use onboard's MCP tools as the
+   authoritative backend rather than degrading blast-radius work to grep.
 
 **Confidence:** high.
 

@@ -39,7 +39,7 @@ and still return useful data.
 Conventions shared by most tools:
 - `root` (optional) — absolute path to the repo root. Defaults to the server's working
   directory.
-- `refresh` (graph tools) — bypass the per-root cached graph and re-index.
+- `refresh` (graph tools) — bypass the bounded per-root cached graph and re-index.
 - `precise` (graph tools: `trace_flow`, `impact`, `repo_map`, `context_pack`) — for Go
   modules, enrich the graph with type-checked edges; for Rust Cargo projects, enrich through
   `rust-analyzer` call hierarchy when available. It is opt-in because language tooling has
@@ -149,10 +149,10 @@ follow to the destination path, and binary files count as zero lines. Degrades g
 | Truncated | `truncated` | bool | more orphans than the limit |
 | Note | `note` | string | the leads-not-verdicts caveat (+ precision hints when applicable) |
 
-**Confidence** reflects what the graph can and cannot see: `high` for an unexported function (nothing outside the repo can reach it), `medium` for an exported function (possible external importer) or an uncalled method *after* precise dispatch resolution, `low` for a method without precise (interface dispatch unresolved). The note is explicit that reflection, code generation, framework/DI registration, build-tagged files, and external importers can all hide a caller — **leads, not verdicts**.
+**Confidence** reflects what the graph can and cannot see: `high` for a private/unexported function (nothing outside the repo can reach it), `medium` for a public or externally reachable function (possible package API / external importer) or an uncalled method *after* precise dispatch resolution, `low` for a method without precise (interface dispatch unresolved). Go uses capitalization for exportedness, Rust uses `pub`, and non-Go/Rust languages are conservative: non-underscore callables are treated as externally reachable because export syntax is not fully modeled. The note is explicit that reflection, code generation, framework/DI registration, build-tagged files, and external importers can all hide a caller — **leads, not verdicts**.
 
 ### `explain_diff`
-*`internal/server/tools_explaindiff.go`* — Scope onboarding to a change set: the files a branch/PR touched, the symbols inside the **changed lines**, and each one's blast radius. Changed lines come from `git diff --unified=0 <base>` (committed and uncommitted work since base, via `git.Diff`); symbols are attributed by line range (`touchedSymbols`: a symbol spans from its declaration to the next one's); impact comes from the same call graph as `impact`.
+*`internal/server/tools_explaindiff.go`* — Scope onboarding to a change set: the files a branch/PR touched, the symbols inside the **changed lines**, and each one's blast radius. Changed lines come from `git diff --unified=0 <base>` (committed and uncommitted work since base, via `git.Diff`); symbols are attributed by line range (`touchedSymbols`: a symbol spans from its declaration to the next one's); impact comes from the same call graph as `impact`. Deleted files are analyzed against a temporary index of the base tree, because their definitions no longer exist in the working tree.
 
 **Input:**
 | Field | JSON | Type | Description |
@@ -180,7 +180,7 @@ Degrades gracefully (a `note`, no error) outside a git repo, when no base branch
 
 ## Code-graph tools
 
-Both graph tools share a per-root indexed-graph cache and resolve their target symbol the
+Both graph tools share a bounded per-root indexed-graph cache and resolve their target symbol the
 same way: `FindSymbols` matches by exact name/QName first, then by QName substring; the
 first match is used and any others are returned in `candidates`. A symbol QName looks like
 `internal/x/y.go::Foo`. See [code-graph.md](code-graph.md) for internals and accuracy
@@ -334,7 +334,7 @@ definitions.
 | Format | `format` | string (opt) | `html` (default) or `mermaid` |
 | Nodes | `nodes` | `[]{id, label, description, files}` (opt) | explicit nodes; if omitted, derived from the graph |
 | Edges | `edges` | `[]{from, to, label}` (opt) | explicit edges; ignored unless `nodes` given |
-| OutputPath | `output_path` | string (opt) | absolute path to write the file; if empty, content is only returned |
+| OutputPath | `output_path` | string (opt) | path to write the file, constrained to the resolved repo root; if empty, content is only returned |
 | Refresh | `refresh` | bool (opt) | re-index (only when deriving) |
 
 **Output:**
@@ -348,8 +348,9 @@ definitions.
 | Truncated | `truncated` | bool | true when the derived graph was capped at 12 nodes |
 | Note | `note` | string (opt) | advisory for an empty/thin graph |
 
-- **`html`** → a self-contained interactive file: Mermaid 11 + svg-pan-zoom, dark theme,
-  click-a-node-for-detail panel. Node IDs/labels are sanitized to prevent SVG injection.
+- **`html`** → a self-contained interactive file with inline SVG rendering, pan/zoom,
+  and a click-a-node-for-detail panel. It has no CDN/runtime network dependency.
+  Node IDs/labels are sanitized to prevent SVG injection.
 - **`mermaid`** → committable `flowchart LR` diagram-as-code with a file-path legend.
 
 When deriving, directories are ranked by call-degree and capped at 12 nodes; only
@@ -383,7 +384,7 @@ onboard-architecture-cartographer, which otherwise asks the model to guess these
 
 **Input:** `root` (opt).
 
-**Output:** `routes` (`[]{method, path, file, line}`), `total`, `truncated`, `note`. Matches registration patterns across Go (chi/gin/echo/gorilla/net-http), Express, Flask, and FastAPI. A **recall-oriented heuristic**, not a parser: it can miss bespoke routing and occasionally over-match (it scans source text, including comments). `ANY` = the pattern (e.g. `net/http` `HandleFunc`) does not pin a method. On an infrastructure repo the empty result points at `stacks` instead.
+**Output:** `routes` (`[]{method, path, file, line}`), `total`, `truncated`, `note`. Matches registration patterns across Go (chi/gin/echo/gorilla/net-http), Express, Flask, and FastAPI. A **recall-oriented heuristic**, not a parser: it filters comments and ordinary string-literal matches before regex matching but can still miss bespoke routing or over-match unusual dynamic code. `ANY` = the pattern (e.g. `net/http` `HandleFunc`) does not pin a method. On an infrastructure repo the empty result points at `stacks` instead.
 
 ### `stacks`
 *`internal/server/tools_stacks.go`* — Deployable infrastructure units (Terraform/Terragrunt/OpenTofu): the IaC analogue of `routes`.
@@ -413,10 +414,11 @@ the on-disk format and lifecycle.
 **Output:** `path`, `sha` (HEAD at write time), `note` (opt — set when not a git repo).
 
 ### `guide_delta`
-*`internal/server/tools_guide.go`* — Compute what changed since the cached guide's SHA, so an update can touch only affected sections.
+*`internal/server/tools_guide.go`* — Compute what changed since the cached guide's SHA, so an update can touch only affected sections. Rename/copy entries include `old_path` and `path` so callers do not have to parse raw git output.
 
-**Output:** `cached_sha`, `head_sha`, `current` (bool), `changed` (`[]{status, path}` from
-`git diff --name-status`), `note` (opt — non-git, no cached guide, or already current).
+**Output:** `cached_sha`, `head_sha`, `current` (bool), `changed`
+(`[]{status, path, old_path?}` from `git diff --name-status`), `note` (opt — non-git, no
+cached guide, or already current).
 
 > `guide_delta` is read-only. After producing an incremental update, the caller invokes
 > `guide_write` with `mode: "delta"` to record the new SHA and mode.

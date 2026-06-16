@@ -59,6 +59,40 @@ func TestRegisterJSONMcpServersPreservesAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRegisterJSONMcpServersRefreshesStalePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	writeJSON(t, path, map[string]any{
+		"theme": "dark",
+		"mcpServers": map[string]any{
+			"other":   map[string]any{"command": "x"},
+			"onboard": map[string]any{"command": "/old/onboard", "args": []string{"serve"}, "note": "keep"},
+		},
+	})
+
+	action, err := registerJSONMcpServers(path, "/new/onboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != "refreshed" {
+		t.Errorf("action = %q, want refreshed", action)
+	}
+	root := readJSON(t, path)
+	if root["theme"] != "dark" {
+		t.Error("clobbered unrelated root key")
+	}
+	servers := root["mcpServers"].(map[string]any)
+	if _, ok := servers["other"]; !ok {
+		t.Error("dropped a sibling server")
+	}
+	ob := servers["onboard"].(map[string]any)
+	if ob["command"] != "/new/onboard" {
+		t.Errorf("command = %v, want refreshed path", ob["command"])
+	}
+	if ob["note"] != "keep" {
+		t.Errorf("dropped unknown onboard field: %v", ob)
+	}
+}
+
 func TestRegisterJSONMcpServersWithTools(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp-config.json")
 	action, err := registerJSONMcpServersWithTools(path, "/usr/local/bin/onboard")
@@ -87,6 +121,44 @@ func TestRegisterJSONMcpServersWithTools(t *testing.T) {
 	}
 }
 
+func TestRegisterJSONMcpServersWithToolsRefreshesToolFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp-config.json")
+	writeJSON(t, path, map[string]any{
+		"mcpServers": map[string]any{
+			"onboard": map[string]any{
+				"command": "/old/onboard",
+				"args":    []string{"serve"},
+				"type":    "stdio",
+				"tools":   []string{"repo_map"},
+				"note":    "keep",
+			},
+		},
+	})
+
+	action, err := registerJSONMcpServersWithTools(path, "/new/onboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != "refreshed" {
+		t.Errorf("action = %q, want refreshed", action)
+	}
+	root := readJSON(t, path)
+	ob := root["mcpServers"].(map[string]any)["onboard"].(map[string]any)
+	if ob["command"] != "/new/onboard" {
+		t.Errorf("command = %v", ob["command"])
+	}
+	if ob["type"] != "local" {
+		t.Errorf("type = %v, want local", ob["type"])
+	}
+	tools := ob["tools"].([]any)
+	if len(tools) != 1 || tools[0] != "*" {
+		t.Errorf("tools = %v, want [*]", tools)
+	}
+	if ob["note"] != "keep" {
+		t.Errorf("dropped unknown onboard field: %v", ob)
+	}
+}
+
 func TestRegisterJSONBacksUpUnparseable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	if err := os.WriteFile(path, []byte("{ this is not json"), 0o644); err != nil {
@@ -101,6 +173,23 @@ func TestRegisterJSONBacksUpUnparseable(t *testing.T) {
 	root := readJSON(t, path)
 	if _, ok := root["mcpServers"]; !ok {
 		t.Error("rewritten file missing mcpServers")
+	}
+}
+
+func TestRegisterJSONReportsBackupPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	if err := os.WriteFile(path, []byte("{ this is not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := registerJSONMcpServersDetailed(path, "/bin/onboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.BackupPath != path+".onboard-bak" {
+		t.Fatalf("BackupPath = %q, want %q", res.BackupPath, path+".onboard-bak")
+	}
+	if !exists(res.BackupPath) {
+		t.Fatal("reported backup path does not exist")
 	}
 }
 
@@ -161,6 +250,47 @@ func TestRegisterJSONOpencodeShape(t *testing.T) {
 	}
 }
 
+func TestRegisterJSONOpencodeRefreshesStalePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.json")
+	writeJSON(t, path, map[string]any{
+		"mcp": map[string]any{
+			"other": map[string]any{"command": []string{"x"}},
+			"onboard": map[string]any{
+				"type":        "local",
+				"command":     []string{"/old/onboard", "serve"},
+				"enabled":     true,
+				"environment": map[string]any{"KEEP": "1"},
+				"note":        "keep",
+			},
+		},
+	})
+
+	action, err := registerJSONOpencode(path, "/new/onboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != "refreshed" {
+		t.Errorf("action = %q, want refreshed", action)
+	}
+	root := readJSON(t, path)
+	mcp := root["mcp"].(map[string]any)
+	if _, ok := mcp["other"]; !ok {
+		t.Error("dropped a sibling server")
+	}
+	ob := mcp["onboard"].(map[string]any)
+	cmd := ob["command"].([]any)
+	if len(cmd) != 2 || cmd[0] != "/new/onboard" || cmd[1] != "serve" {
+		t.Errorf("command = %v, want [/new/onboard serve]", cmd)
+	}
+	env := ob["environment"].(map[string]any)
+	if env["KEEP"] != "1" {
+		t.Errorf("environment was not preserved: %v", env)
+	}
+	if ob["note"] != "keep" {
+		t.Errorf("dropped unknown onboard field: %v", ob)
+	}
+}
+
 func TestRegisterTOMLAppendsAndIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	existing := "# my codex config\nmodel = \"gpt-5\"\n"
@@ -191,6 +321,32 @@ func TestRegisterTOMLAppendsAndIsIdempotent(t *testing.T) {
 	}
 	if action != "already-present" {
 		t.Errorf("second call action = %q, want already-present", action)
+	}
+}
+
+func TestRegisterTOMLRefreshesStalePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	existing := "model = \"gpt-5\"\n\n[mcp_servers.onboard]\n# keep this comment\ncommand = \"/old/onboard\"\nargs = [\"serve\"]\n\n[mcp_servers.other]\ncommand = \"x\"\n"
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	action, err := registerTOML(path, "/new/onboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != "refreshed" {
+		t.Errorf("action = %q, want refreshed", action)
+	}
+	s := readFile(t, path)
+	if !strings.Contains(s, "model = \"gpt-5\"") || !strings.Contains(s, "# keep this comment") {
+		t.Errorf("dropped existing TOML content:\n%s", s)
+	}
+	if !strings.Contains(s, `command = "/new/onboard"`) {
+		t.Errorf("did not refresh onboard command:\n%s", s)
+	}
+	if !strings.Contains(s, "[mcp_servers.other]\ncommand = \"x\"") {
+		t.Errorf("modified another TOML table:\n%s", s)
 	}
 }
 
@@ -416,6 +572,131 @@ func TestRegisterJSONOpencodeIdempotent(t *testing.T) {
 	}
 }
 
+func TestInstallRefreshesStaleBinarySoInspectIsHealthy(t *testing.T) {
+	dir := t.TempDir()
+	oldBin := filepath.Join(dir, "old", "onboard")
+	newBin := filepath.Join(dir, "new", "onboard")
+	if err := os.MkdirAll(filepath.Dir(oldBin), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(newBin), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldBin, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newBin, []byte("new"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	a := Agent{
+		Name:       "test",
+		SkillsDir:  filepath.Join(dir, "skills"),
+		ConfigPath: filepath.Join(dir, "config.toml"),
+		Shape:      ShapeTOMLMcpServers,
+	}
+	if _, err := Install(a, oldBin); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(oldBin); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Install(a, newBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ConfigAction != "refreshed" {
+		t.Fatalf("ConfigAction = %q, want refreshed", res.ConfigAction)
+	}
+	h := Inspect(a)
+	if !h.OK() {
+		t.Fatalf("Inspect() not healthy after refresh: %+v", h)
+	}
+	if h.ConfiguredBin != newBin {
+		t.Errorf("ConfiguredBin = %q, want %q", h.ConfiguredBin, newBin)
+	}
+}
+
+func TestPreviewInstallDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	a := Agent{
+		Name:       "test",
+		SkillsDir:  filepath.Join(dir, "skills"),
+		ConfigPath: filepath.Join(dir, "config.toml"),
+		Shape:      ShapeTOMLMcpServers,
+	}
+	res, err := PreviewInstall(a, "/bin/onboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ConfigAction != "appended" {
+		t.Fatalf("ConfigAction = %q, want appended", res.ConfigAction)
+	}
+	if res.SkillFiles == 0 {
+		t.Fatal("preview should report embedded skill file count")
+	}
+	if exists(a.ConfigPath) {
+		t.Fatal("preview created config file")
+	}
+	if exists(a.SkillsDir) {
+		t.Fatal("preview created skills dir")
+	}
+}
+
+func TestUninstallRemovesOnboardConfigAndSkills(t *testing.T) {
+	dir := t.TempDir()
+	a := Agent{
+		Name:       "test",
+		SkillsDir:  filepath.Join(dir, "skills"),
+		ConfigPath: filepath.Join(dir, "config.toml"),
+		Shape:      ShapeTOMLMcpServers,
+	}
+	if _, err := Install(a, "/bin/onboard"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Uninstall(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ConfigAction != "removed" {
+		t.Fatalf("ConfigAction = %q, want removed", res.ConfigAction)
+	}
+	if res.SkillDirsRemoved == 0 {
+		t.Fatal("expected uninstall to remove onboard skill dirs")
+	}
+	if strings.Contains(readFile(t, a.ConfigPath), "[mcp_servers.onboard]") {
+		t.Fatal("uninstall left onboard TOML table behind")
+	}
+	if exists(filepath.Join(a.SkillsDir, "onboard-codebase-walkthrough")) {
+		t.Fatal("uninstall left onboard skill dir behind")
+	}
+}
+
+func TestUninstallJSONPreservesSiblingServers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	writeJSON(t, path, map[string]any{
+		"mcpServers": map[string]any{
+			"other":   map[string]any{"command": "x"},
+			"onboard": map[string]any{"command": "/bin/onboard", "args": []string{"serve"}},
+		},
+	})
+	a := Agent{Name: "test", ConfigPath: path, Shape: ShapeJSONMcpServers}
+	res, err := Uninstall(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ConfigAction != "removed" {
+		t.Fatalf("ConfigAction = %q, want removed", res.ConfigAction)
+	}
+	servers := readJSON(t, path)["mcpServers"].(map[string]any)
+	if _, ok := servers["onboard"]; ok {
+		t.Fatal("onboard server was not removed")
+	}
+	if _, ok := servers["other"]; !ok {
+		t.Fatal("sibling server was removed")
+	}
+}
+
 func TestUnparseableRewriteIsNotWorldReadable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "c.json")
 	if err := os.WriteFile(path, []byte("{ not json"), 0o600); err != nil {
@@ -476,7 +757,7 @@ func TestRegisterTOMLCommentedTableNotDetected(t *testing.T) {
 
 func TestRegisterTOMLQuotedKeyFormDetected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte("[mcp_servers.\"onboard\"]\ncommand = \"x\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("[mcp_servers.\"onboard\"]\ncommand = \"/bin/onboard\"\nargs = [\"serve\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	action, err := registerTOML(path, "/bin/onboard")

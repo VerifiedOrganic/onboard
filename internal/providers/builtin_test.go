@@ -105,6 +105,22 @@ func TestBuiltinSkipsVendorAndUnknown(t *testing.T) {
 	}
 }
 
+func TestBuiltinSkipsVeryLargeFiles(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "large.go", "package large\n"+strings.Repeat("// padding\n", (maxIndexedFileBytes/len("// padding\n"))+1))
+
+	g, err := Builtin{}.Index(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Files != 0 {
+		t.Fatalf("large file should be skipped, indexed files = %d", g.Files)
+	}
+	if !strings.Contains(g.Note, "large.go") {
+		t.Fatalf("skip note = %q, want large.go", g.Note)
+	}
+}
+
 func TestProvidersRejectMissingRoot(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
 	if _, err := (Builtin{}).Index(context.Background(), missing); err == nil {

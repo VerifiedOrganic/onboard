@@ -135,7 +135,7 @@ func registerGuideTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "guide_delta",
-		Description: "Compute what changed since the cached guide's SHA: returns the cached vs HEAD SHA and the list of added/modified/deleted files, so an update can touch only affected sections.",
+		Description: "Compute what changed since the cached guide's SHA: returns the cached vs HEAD SHA and the list of added/modified/deleted/renamed files, including old_path for renames, so an update can touch only affected sections.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in guideDeltaInput) (*mcp.CallToolResult, guideDeltaOutput, error) {
 		root, err := resolveRoot(in.Root)
 		if err != nil {

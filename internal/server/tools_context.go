@@ -113,7 +113,7 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 			maxPR = v
 		}
 	}
-	churn := fileChurn(root)
+	churn := fileChurn(root, in.Refresh)
 	var maxLogChurn float64
 	for _, c := range churn {
 		if l := math.Log1p(float64(c)); l > maxLogChurn {

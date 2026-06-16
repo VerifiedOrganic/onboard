@@ -51,11 +51,16 @@ func TestRenderMapHTMLExplicit(t *testing.T) {
 		t.Errorf("node count = %d, want 2", out.NodeCount)
 	}
 	for _, want := range []string{
-		"<!doctype html>", "class=\"mermaid\"", "flowchart LR",
-		"auth", "db", `auth -->|"queries"| db`, "onNode", "svg-pan-zoom", "Auth flow",
+		"<!doctype html>", "<svg id=\"svg\"", "flowchart LR",
+		"auth", "db", `auth --\u003e|\"queries\"| db`, "showNode", "Reset", "Auth flow",
 	} {
 		if !strings.Contains(out.Content, want) {
 			t.Errorf("HTML missing %q", want)
+		}
+	}
+	for _, blocked := range []string{"https://", "cdn.jsdelivr.net", "svg-pan-zoom", "src=\"http", "import mermaid"} {
+		if strings.Contains(out.Content, blocked) {
+			t.Errorf("self-contained HTML should not reference %q", blocked)
 		}
 	}
 	// details JSON must carry the description for the click panel
@@ -65,8 +70,10 @@ func TestRenderMapHTMLExplicit(t *testing.T) {
 }
 
 func TestRenderMapWritesFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "out", "map.html")
+	root := t.TempDir()
+	path := filepath.Join(root, "out", "map.html")
 	out, err := renderMap(context.Background(), renderMapInput{
+		Root:       root,
 		Topic:      "X",
 		Format:     "html",
 		Nodes:      []mapNode{{ID: "n1", Label: "One"}, {ID: "n2", Label: "Two"}},
@@ -84,6 +91,24 @@ func TestRenderMapWritesFile(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "<!doctype html>") {
 		t.Error("written file is not the rendered HTML")
+	}
+}
+
+func TestRenderMapRejectsOutputPathOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "map.html")
+	_, err := renderMap(context.Background(), renderMapInput{
+		Root:       root,
+		Topic:      "X",
+		Format:     "html",
+		Nodes:      []mapNode{{ID: "n1", Label: "One"}, {ID: "n2", Label: "Two"}},
+		OutputPath: outside,
+	})
+	if err == nil {
+		t.Fatal("expected output path outside root to be rejected")
+	}
+	if !strings.Contains(err.Error(), "must stay within repo root") {
+		t.Fatalf("error = %v, want repo-root restriction", err)
 	}
 }
 

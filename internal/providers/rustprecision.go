@@ -79,6 +79,7 @@ func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
 	if g.ProvenEdges == nil {
 		g.ProvenEdges = map[string]bool{}
 	}
+	edgesSeen := edgeSetFromGraph(g)
 	added := 0
 	proved := false
 	for _, e := range edges {
@@ -96,18 +97,9 @@ func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
 		}
 		proved = true
 		g.ProvenEdges[key] = true
-		isNew := true
-		for _, c := range g.Forward[caller] {
-			if c == callee {
-				isNew = false
-				break
-			}
-		}
-		if isNew {
+		if edgesSeen.add(g, caller, callee) {
 			added++
 		}
-		g.Forward[caller] = appendUnique(g.Forward[caller], callee)
-		g.Reverse[callee] = appendUnique(g.Reverse[callee], caller)
 	}
 	if proved {
 		g.MarkPrecision("rust-analyzer")
@@ -211,20 +203,48 @@ func rustPrecisionFailure(err error) string {
 }
 
 func rustCallableQNames(g *Graph) ([]string, int, bool) {
-	var qnames []string
+	type candidate struct {
+		qname   string
+		rank    float64
+		impact  int
+		callers int
+	}
+	var candidates []candidate
 	if g != nil {
+		pr := g.PageRank(nil)
 		for q, s := range g.Defs {
 			if strings.EqualFold(s.Lang, "rust") && (s.Kind == "function" || s.Kind == "method") {
-				qnames = append(qnames, q)
+				candidates = append(candidates, candidate{
+					qname:   q,
+					rank:    pr[q],
+					impact:  len(g.Impact(q)),
+					callers: len(g.Reverse[q]),
+				})
 			}
 		}
 	}
-	sort.Strings(qnames)
-	total := len(qnames)
-	if len(qnames) > maxRustPreciseSyms {
-		return qnames[:maxRustPreciseSyms], total, true
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].rank != candidates[j].rank {
+			return candidates[i].rank > candidates[j].rank
+		}
+		if candidates[i].impact != candidates[j].impact {
+			return candidates[i].impact > candidates[j].impact
+		}
+		if candidates[i].callers != candidates[j].callers {
+			return candidates[i].callers > candidates[j].callers
+		}
+		return candidates[i].qname < candidates[j].qname
+	})
+	total := len(candidates)
+	if len(candidates) > maxRustPreciseSyms {
+		candidates = candidates[:maxRustPreciseSyms]
 	}
-	return qnames, total, false
+	qnames := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		qnames = append(qnames, c.qname)
+	}
+	truncated := total > len(qnames)
+	return qnames, total, truncated
 }
 
 type rustAnalyzerClient struct {
@@ -320,13 +340,50 @@ type outgoingCall struct {
 func (c *rustAnalyzerClient) prepareCallHierarchy(ctx context.Context, absFile string, line, col int) (callHierarchyItem, bool) {
 	params := map[string]any{
 		"textDocument": map[string]any{"uri": fileURI(absFile)},
-		"position":     lspPosition{Line: line - 1, Character: col},
+		"position":     lspPosition{Line: line - 1, Character: utf16ColumnForFile(absFile, line, col)},
 	}
 	var items []callHierarchyItem
 	if err := c.call(ctx, "textDocument/prepareCallHierarchy", params, &items); err != nil || len(items) == 0 {
 		return callHierarchyItem{}, false
 	}
 	return items[0], true
+}
+
+func utf16ColumnForFile(absFile string, line, byteCol int) int {
+	data, err := os.ReadFile(absFile)
+	if err != nil || line <= 0 || byteCol <= 0 {
+		return byteCol
+	}
+	lineStart := 0
+	currentLine := 1
+	for i, b := range data {
+		if currentLine == line {
+			lineStart = i
+			break
+		}
+		if b == '\n' {
+			currentLine++
+		}
+	}
+	if currentLine != line {
+		return byteCol
+	}
+	lineEnd := len(data)
+	if next := bytes.IndexByte(data[lineStart:], '\n'); next >= 0 {
+		lineEnd = lineStart + next
+	}
+	if byteCol > lineEnd-lineStart {
+		byteCol = lineEnd - lineStart
+	}
+	units := 0
+	for _, r := range string(data[lineStart : lineStart+byteCol]) {
+		if r > 0xFFFF {
+			units += 2
+		} else {
+			units++
+		}
+	}
+	return units
 }
 
 func (c *rustAnalyzerClient) outgoingCalls(ctx context.Context, item callHierarchyItem) ([]outgoingCall, bool) {

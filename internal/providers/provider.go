@@ -205,15 +205,6 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
-func appendUnique(list []string, v string) []string {
-	for _, x := range list {
-		if x == v {
-			return list
-		}
-	}
-	return append(list, v)
-}
-
 func uniqueQName(defs map[string]*Symbol, rel, name string, line int) string {
 	qn := rel + "::" + name
 	if _, exists := defs[qn]; !exists {
@@ -227,6 +218,59 @@ func uniqueQName(defs map[string]*Symbol, rel, name string, line int) string {
 		}
 		qn = fmt.Sprintf("%s.%d", base, n)
 	}
+}
+
+type graphEdgeSet struct {
+	forward map[string]map[string]bool
+	reverse map[string]map[string]bool
+}
+
+func newGraphEdgeSet() *graphEdgeSet {
+	return &graphEdgeSet{
+		forward: map[string]map[string]bool{},
+		reverse: map[string]map[string]bool{},
+	}
+}
+
+func edgeSetFromGraph(g *Graph) *graphEdgeSet {
+	set := newGraphEdgeSet()
+	if g == nil {
+		return set
+	}
+	for caller, callees := range g.Forward {
+		for _, callee := range callees {
+			set.mark(caller, callee)
+		}
+	}
+	return set
+}
+
+func (s *graphEdgeSet) add(g *Graph, caller, callee string) bool {
+	if caller == "" || callee == "" || caller == callee {
+		return false
+	}
+	if s.has(caller, callee) {
+		return false
+	}
+	s.mark(caller, callee)
+	g.Forward[caller] = append(g.Forward[caller], callee)
+	g.Reverse[callee] = append(g.Reverse[callee], caller)
+	return true
+}
+
+func (s *graphEdgeSet) has(caller, callee string) bool {
+	return s.forward[caller] != nil && s.forward[caller][callee]
+}
+
+func (s *graphEdgeSet) mark(caller, callee string) {
+	if s.forward[caller] == nil {
+		s.forward[caller] = map[string]bool{}
+	}
+	if s.reverse[callee] == nil {
+		s.reverse[callee] = map[string]bool{}
+	}
+	s.forward[caller][callee] = true
+	s.reverse[callee][caller] = true
 }
 
 func normalizeRoot(root string) (string, error) {

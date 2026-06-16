@@ -347,10 +347,7 @@ func isEntryName(name string) bool {
 	return false
 }
 
-// isExported applies the common visibility conventions: a leading uppercase rune (Go and
-// other export-by-capitalization languages) means exported; a leading underscore (Python,
-// JS) means private. A heuristic — the note flags it as such.
-func isExported(name string) bool {
+func exportedByCapitalization(name string) bool {
 	if name == "" {
 		return false
 	}
@@ -361,14 +358,25 @@ func isExported(name string) bool {
 	return unicode.IsUpper(r)
 }
 
+func privateByConvention(name string) bool {
+	return strings.HasPrefix(name, "_")
+}
+
 func symbolExported(sym *providers.Symbol) bool {
 	if sym == nil {
 		return false
 	}
-	if strings.EqualFold(sym.Lang, "rust") {
+	switch strings.ToLower(sym.Lang) {
+	case "rust":
 		return sym.Public
+	case "go":
+		return exportedByCapitalization(sym.Name)
+	default:
+		// For languages where this indexer does not recover export syntax reliably
+		// (JS/TS/Python/Ruby/etc.), do not treat lowercase as private. A non-underscore
+		// function may be part of a package/module API even when nothing in-repo calls it.
+		return !privateByConvention(sym.Name)
 	}
-	return isExported(sym.Name)
 }
 
 func symbolCallableKind(sym *providers.Symbol) string {
@@ -392,9 +400,9 @@ func orphanConfidence(kind string, exported, precise bool) (confidence, reason s
 	case kind == "method":
 		return "medium", "method with no caller even after available semantic dispatch resolution"
 	case exported:
-		return "medium", "exported function with no in-repo caller — may be public API or used by an external importer"
+		return "medium", "public or externally reachable function with no in-repo caller — may be package API or used by an external importer"
 	default:
-		return "high", "unexported function with no caller — unreachable within this repo"
+		return "high", "private/unexported function with no caller — unreachable within this repo"
 	}
 }
 
@@ -403,6 +411,7 @@ func deadCodeNote(g *providers.Graph, requestedPrecise bool) string {
 		"framework/DI registration, build-tagged files, or external importers — verify before deleting. " +
 		"Entry points, framework-managed lifecycles (React, SvelteKit, Next.js, Angular, Storybook), " +
 		"generated files, and test functions are already excluded or marked low-confidence. " +
+		"For non-Go/Rust languages, non-underscore callables are treated as externally reachable because export syntax is not fully modeled. " +
 		"For Terraform/HCL, resources and module calls are never reported (they exist for their side effects); " +
 		"unused variables, locals, and outputs are."
 	if requestedPrecise && !g.Precise {

@@ -10,8 +10,8 @@ codebase — yours, or one you've been handed and don't yet trust.
 ## Step 0 — You'll need
 
 - **Go 1.25 or newer** to build from source (the path below).
-- **At least one MCP-capable agent** installed: Claude Code, Codex, Grok, opencode,
-  Cursor, Copilot CLI, or Junie CLI. `onboard` wires itself into whichever ones it
+- **At least one MCP-capable agent** installed: Claude Code, Codex, Grok, Kimi CLI,
+  opencode, Cursor, Copilot CLI, or Junie CLI. `onboard` wires itself into whichever ones it
   finds. (MCP = the Model Context Protocol — the open standard those agents use to talk to
   external tools. If your agent speaks MCP, onboard works with it.)
 
@@ -32,6 +32,7 @@ language set.
 ## Step 2 — Wire it into your agents
 
 ```sh
+./onboard init --dry-run
 ./onboard init
 ```
 
@@ -41,18 +42,22 @@ MCP server in that agent's config. You'll see a line per agent:
 
 ```
 Scanning for installed agents...
-  ✓ claude    config: merged          skills: 15 file(s)
-  ✓ codex     config: appended        skills: 15 file(s)
+  ✓ claude    config: merged          skills: 17 file(s)
+  ✓ codex     config: appended        skills: 17 file(s)
   – cursor    not detected, skipping
 ```
 
-> "15 file(s)" and "5 skills" are both right: there are **5 skill bundles**, made of ~15
+> "17 file(s)" and "6 skills" are both right: there are **6 skill bundles**, made of 17
 > files total (a `SKILL.md` plus reference docs each). `init` counts the files it wrote;
-> `doctor` (next step) counts the 5 bundles. Same skills, different unit. Only the agents
+> `doctor` (next step) counts the 6 bundles. Same skills, different unit. Only the agents
 > you actually have installed show up — don't worry about the ones that say "not detected."
 > On upgrades from older onboard releases, the line may also say it cleaned legacy skill
 > dirs; that means old unprefixed onboard skills were replaced by the current `onboard-*`
 > names.
+
+Use `--dry-run` on `init` or `install` to preview config paths, skill paths, and planned
+actions without writing files. `onboard uninstall --agent NAME` removes onboard's MCP entry
+and embedded skill dirs if you need to roll an agent back.
 
 Want just one, or one that isn't detected yet? Name it explicitly — this creates the dirs
 it needs:
@@ -76,9 +81,9 @@ whether onboard is registered, whether the binary it points at still exists, and
 skills landed:
 
 ```
-  ✓ claude    registered=true  bin=true  skills=5/5
+  ✓ claude    registered=true  bin=true  skills=6/6
       bin: /Users/you/code/onboard/onboard
-  ✗ codex     registered=true  bin=false skills=5/5
+  ✗ codex     registered=true  bin=false skills=6/6
       bin: /old/path/onboard
       ! configured binary not found: /old/path/onboard (re-run install to refresh the path)
 ```
@@ -147,14 +152,16 @@ agent. You run onboard as a *server* and have an **MCP client** call its tools:
 
 ```sh
 ./onboard serve                 # MCP over stdio
-./onboard serve --http :8080    # MCP over Streamable HTTP at /mcp
+./onboard serve --http 127.0.0.1:8080    # MCP over Streamable HTTP at /mcp
 ```
 
 One honest caveat: these start the server, they don't print a walkthrough by themselves.
 `onboard` is the server; you still need *something that speaks MCP* on the other end (an
 agent, or an MCP client library in your CI script) to actually call `recon`, `trace_flow`,
 and friends. There's deliberately no standalone `onboard analyze` that dumps results to
-your terminal — the analysis lives behind the MCP tools.
+your terminal — the analysis lives behind the MCP tools. Keep HTTP bound to loopback unless
+you are deliberately putting it behind your own auth, TLS, and network controls; see
+[trust.md](trust.md).
 
 ## When something's off
 

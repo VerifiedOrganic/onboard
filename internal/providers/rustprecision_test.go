@@ -65,6 +65,50 @@ func TestRustCallableQNamesReportsTruncation(t *testing.T) {
 	}
 }
 
+func TestRustCallableQNamesPrioritizesCentralSymbols(t *testing.T) {
+	g := &Graph{
+		Defs:    map[string]*Symbol{},
+		Forward: map[string][]string{},
+		Reverse: map[string][]string{},
+	}
+	hot := "src/lib.rs::zz_hot"
+	g.Defs[hot] = &Symbol{QName: hot, Name: "zz_hot", Kind: "function", File: "src/lib.rs", Lang: "rust"}
+	for i := 0; i < maxRustPreciseSyms+5; i++ {
+		q := fmt.Sprintf("src/lib.rs::f%03d", i)
+		g.Defs[q] = &Symbol{QName: q, Name: fmt.Sprintf("f%03d", i), Kind: "function", File: "src/lib.rs", Lang: "rust"}
+		if i < 20 {
+			g.Forward[q] = []string{hot}
+			g.Reverse[hot] = append(g.Reverse[hot], q)
+		}
+	}
+
+	qnames, _, truncated := rustCallableQNames(g)
+	if !truncated {
+		t.Fatal("expected truncation")
+	}
+	found := false
+	for _, q := range qnames {
+		if q == hot {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("central Rust symbol %q should be selected ahead of lexically earlier low-impact symbols", hot)
+	}
+}
+
+func TestUTF16ColumnForFile(t *testing.T) {
+	root := t.TempDir()
+	content := "é😀 run\n"
+	writeRustPrecisionFixture(t, root, "src/lib.rs", content)
+	byteCol := len("é😀 ")
+	got := utf16ColumnForFile(filepath.Join(root, "src", "lib.rs"), 1, byteCol)
+	if got != 4 { // é = 1 UTF-16 unit, 😀 = 2, space = 1
+		t.Fatalf("UTF-16 column = %d, want 4", got)
+	}
+}
+
 func writeRustPrecisionFixture(t *testing.T, root, rel, content string) {
 	t.Helper()
 	p := filepath.Join(root, rel)

@@ -57,6 +57,10 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 	if out.Format != "mermaid" {
 		out.Format = "html"
 	}
+	root, err := resolveRoot(in.Root)
+	if err != nil {
+		return out, err
+	}
 	topic := in.Topic
 	if topic == "" {
 		topic = "Codebase map"
@@ -64,10 +68,6 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 
 	nodes, edges := in.Nodes, in.Edges
 	if len(nodes) == 0 {
-		root, err := resolveRoot(in.Root)
-		if err != nil {
-			return out, err
-		}
 		g, err := indexGraph(ctx, root, in.Refresh, false) // package-level import map: syntactic is sufficient
 		if err != nil {
 			return out, err
@@ -135,18 +135,37 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 	}
 
 	if in.OutputPath != "" {
-		// OutputPath is caller-controlled by design: render_map is a file-writing
-		// tool and the MCP caller (the agent) is trusted, like Write. The content
-		// is always returned inline too, so writing is opt-in.
-		if err := os.MkdirAll(filepath.Dir(in.OutputPath), 0o700); err != nil {
+		outputPath, err := resolveOutputPath(root, in.OutputPath)
+		if err != nil {
 			return out, err
 		}
-		if err := os.WriteFile(in.OutputPath, []byte(out.Content), 0o644); err != nil {
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
 			return out, err
 		}
-		out.Path = in.OutputPath
+		if err := os.WriteFile(outputPath, []byte(out.Content), 0o644); err != nil {
+			return out, err
+		}
+		out.Path = outputPath
 	}
 	return out, nil
+}
+
+func resolveOutputPath(root, outputPath string) (string, error) {
+	if !filepath.IsAbs(outputPath) {
+		outputPath = filepath.Join(root, outputPath)
+	}
+	abs, err := filepath.Abs(outputPath)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("output_path %q must stay within repo root %q", outputPath, root)
+	}
+	return abs, nil
 }
 
 // deriveMap aggregates the file-level call graph to a directory-level dependency

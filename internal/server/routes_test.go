@@ -85,6 +85,59 @@ func TestRoutesLineNumbers(t *testing.T) {
 	}
 }
 
+func TestRoutesIgnoreCommentedOutRegistrations(t *testing.T) {
+	root := t.TempDir()
+	writeRouteFile(t, root, "web/routes.js", `
+// app.get('/commented', oldHandler)
+/*
+router.post('/blocked', oldHandler)
+*/
+app.get('/live', liveHandler)
+`)
+	writeRouteFile(t, root, "svc/app.py", `
+# @app.route("/old", methods=["GET"])
+@app.route("/new", methods=["POST"])
+def new(): ...
+`)
+
+	out, err := routesExtract(context.Background(), routesInput{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasRoute(out, "GET", "/commented") || hasRoute(out, "POST", "/blocked") || hasRoute(out, "GET", "/old") {
+		t.Fatalf("commented-out routes were extracted: %+v", out.Routes)
+	}
+	if !hasRoute(out, "GET", "/live") || !hasRoute(out, "POST", "/new") {
+		t.Fatalf("live routes missing after comment stripping: %+v", out.Routes)
+	}
+}
+
+func TestRoutesIgnoreRegistrationsInsideStrings(t *testing.T) {
+	root := t.TempDir()
+	writeRouteFile(t, root, "web/routes.js", `
+const example = "app.get('/docs-only', handler)";
+const block = `+"`"+`router.post('/template-only', handler)`+"`"+`;
+app.get('/live', liveHandler);
+`)
+	writeRouteFile(t, root, "api/server.go", `package api
+func setup(r chi.Router) {
+	doc := "r.Get(\"/string-only\", h)"
+	r.Get("/health", health)
+	_ = doc
+}`)
+
+	out, err := routesExtract(context.Background(), routesInput{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasRoute(out, "GET", "/docs-only") || hasRoute(out, "POST", "/template-only") || hasRoute(out, "GET", "/string-only") {
+		t.Fatalf("string literal routes were extracted: %+v", out.Routes)
+	}
+	if !hasRoute(out, "GET", "/live") || !hasRoute(out, "GET", "/health") {
+		t.Fatalf("live routes missing: %+v", out.Routes)
+	}
+}
+
 func TestGoRouteGroupPrefixDoesNotLeakPastClosure(t *testing.T) {
 	root := t.TempDir()
 	writeRouteFile(t, root, "routes.go", `package routes

@@ -221,6 +221,7 @@ func routesExtract(_ context.Context, in routesInput) (routesOutput, error) {
 }
 
 func scanRoutes(content, file string, add func(method, path, file string, line int, source, pattern, confidence string)) {
+	content = stripRouteComments(content)
 	ext := strings.ToLower(filepath.Ext(file))
 	if ext == ".go" {
 		scanGoRoutes(content, file, add)
@@ -232,6 +233,9 @@ func scanRoutes(content, file string, add func(method, path, file string, line i
 	// React Router
 	reactRouterRe := regexp.MustCompile(`\bpath\s*(?::|=)\s*['"]([^'"]+)['"]`)
 	for _, m := range reactRouterRe.FindAllStringSubmatchIndex(content, -1) {
+		if insideRouteStringLiteral(content, m[0]) {
+			continue
+		}
 		path := content[m[2]:m[3]]
 		end := m[0] + 30
 		if end > len(content) {
@@ -244,6 +248,9 @@ func scanRoutes(content, file string, add func(method, path, file string, line i
 
 	// Express/FastAPI-style
 	for _, m := range methodPathRe.FindAllStringSubmatchIndex(content, -1) {
+		if insideRouteStringLiteral(content, m[0]) {
+			continue
+		}
 		method := content[m[2]:m[3]]
 		path := content[m[4]:m[5]]
 		if looksLikePath(path) {
@@ -253,6 +260,9 @@ func scanRoutes(content, file string, add func(method, path, file string, line i
 
 	// Flask/Django
 	for _, m := range routeRe.FindAllStringSubmatchIndex(content, -1) {
+		if insideRouteStringLiteral(content, m[0]) {
+			continue
+		}
 		path := content[m[2]:m[3]]
 		if !looksLikePath(path) {
 			continue
@@ -270,11 +280,139 @@ func scanRoutes(content, file string, add func(method, path, file string, line i
 
 	// HandleFunc / Handle
 	for _, m := range handleRe.FindAllStringSubmatchIndex(content, -1) {
+		if insideRouteStringLiteral(content, m[0]) {
+			continue
+		}
 		path := content[m[2]:m[3]]
 		if looksLikePath(path) {
 			add("ANY", path, file, lineAt(content, m[0]), "regex-heuristic", "Go standard HTTP multiplexer", "medium")
 		}
 	}
+}
+
+func stripRouteComments(content string) string {
+	var b strings.Builder
+	b.Grow(len(content))
+	inSingle, inDouble, inBacktick, escaped, inBlock := false, false, false, false, false
+	for i := 0; i < len(content); i++ {
+		c := content[i]
+		if inBlock {
+			if c == '*' && i+1 < len(content) && content[i+1] == '/' {
+				b.WriteString("  ")
+				i++
+				inBlock = false
+				continue
+			}
+			if c == '\n' {
+				b.WriteByte('\n')
+			} else {
+				b.WriteByte(' ')
+			}
+			continue
+		}
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if inSingle || inDouble || inBacktick {
+			b.WriteByte(c)
+			if c == '\\' && !inBacktick {
+				escaped = true
+				continue
+			}
+			switch c {
+			case '\'':
+				if inSingle {
+					inSingle = false
+				}
+			case '"':
+				if inDouble {
+					inDouble = false
+				}
+			case '`':
+				if inBacktick {
+					inBacktick = false
+				}
+			}
+			continue
+		}
+		switch {
+		case c == '/' && i+1 < len(content) && content[i+1] == '/':
+			for i < len(content) && content[i] != '\n' {
+				b.WriteByte(' ')
+				i++
+			}
+			if i < len(content) {
+				b.WriteByte('\n')
+			}
+		case c == '/' && i+1 < len(content) && content[i+1] == '*':
+			b.WriteString("  ")
+			i++
+			inBlock = true
+		case c == '#':
+			for i < len(content) && content[i] != '\n' {
+				b.WriteByte(' ')
+				i++
+			}
+			if i < len(content) {
+				b.WriteByte('\n')
+			}
+		case c == '\'':
+			inSingle = true
+			b.WriteByte(c)
+		case c == '"':
+			inDouble = true
+			b.WriteByte(c)
+		case c == '`':
+			inBacktick = true
+			b.WriteByte(c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+func insideRouteStringLiteral(content string, idx int) bool {
+	inSingle, inDouble, inBacktick, escaped := false, false, false, false
+	for i := 0; i < len(content) && i < idx; i++ {
+		c := content[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inSingle || inDouble || inBacktick {
+			if c == '\\' && !inBacktick {
+				escaped = true
+				continue
+			}
+			switch c {
+			case '\'':
+				if inSingle {
+					inSingle = false
+				}
+			case '"':
+				if inDouble {
+					inDouble = false
+				}
+			case '`':
+				if inBacktick {
+					inBacktick = false
+				}
+			}
+			continue
+		}
+		switch c {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '`':
+			inBacktick = true
+		}
+	}
+	return inSingle || inDouble || inBacktick
 }
 
 func scanGoRoutes(content, file string, add func(method, path, file string, line int, source, pattern, confidence string)) {
@@ -291,16 +429,19 @@ func scanGoRoutes(content, file string, add func(method, path, file string, line
 	nonAssignGroupRe := regexp.MustCompile(`([\w$]+)\.(?:Group|Route|PathPrefix|Subrouter)\(\s*["']([^"']+)`)
 	methodRe := regexp.MustCompile(`(?i)([\w$]+)\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|HandleFunc|Handle)\(\s*["']([^"']+)`)
 
+	offset := 0
 	for i, rawLine := range lines {
 		line := strings.TrimSpace(rawLine)
 		if line == "" || strings.HasPrefix(line, "//") {
+			offset += len(rawLine) + 1
 			continue
 		}
+		lineOffset := offset + len(rawLine) - len(strings.TrimLeft(rawLine, " \t"))
 		assignedGroup := false
-		if m := groupRe.FindStringSubmatch(line); m != nil {
-			child := m[1]
-			parent := m[2]
-			pathArg := m[3]
+		if m := groupRe.FindStringSubmatchIndex(line); m != nil && !insideRouteStringLiteral(content, lineOffset+m[0]) {
+			child := line[m[2]:m[3]]
+			parent := line[m[4]:m[5]]
+			pathArg := line[m[6]:m[7]]
 			parentPrefix := prefixes[parent]
 			fullPrefix := parentPrefix + "/" + strings.TrimPrefix(pathArg, "/")
 			fullPrefix = strings.ReplaceAll(fullPrefix, "//", "/")
@@ -308,9 +449,9 @@ func scanGoRoutes(content, file string, add func(method, path, file string, line
 			assignedGroup = true
 		}
 		if !assignedGroup {
-			if m := nonAssignGroupRe.FindStringSubmatch(line); m != nil {
-				router := m[1]
-				pathArg := m[2]
+			if m := nonAssignGroupRe.FindStringSubmatchIndex(line); m != nil && !insideRouteStringLiteral(content, lineOffset+m[0]) {
+				router := line[m[2]:m[3]]
+				pathArg := line[m[4]:m[5]]
 				prefix := prefixes[router]
 				fullPrefix := prefix + "/" + strings.TrimPrefix(pathArg, "/")
 				fullPrefix = strings.ReplaceAll(fullPrefix, "//", "/")
@@ -322,10 +463,10 @@ func scanGoRoutes(content, file string, add func(method, path, file string, line
 				prefixes[router] = fullPrefix
 			}
 		}
-		if m := methodRe.FindStringSubmatch(line); m != nil {
-			router := m[1]
-			method := m[2]
-			pathArg := m[3]
+		if m := methodRe.FindStringSubmatchIndex(line); m != nil && !insideRouteStringLiteral(content, lineOffset+m[0]) {
+			router := line[m[2]:m[3]]
+			method := line[m[4]:m[5]]
+			pathArg := line[m[6]:m[7]]
 			prefix := prefixes[router]
 			fullPrefix := prefix + "/" + strings.TrimPrefix(pathArg, "/")
 			fullPrefix = strings.ReplaceAll(fullPrefix, "//", "/")
@@ -350,6 +491,7 @@ func scanGoRoutes(content, file string, add func(method, path, file string, line
 				prefixes[scope.router] = scope.prev
 			}
 		}
+		offset += len(rawLine) + 1
 	}
 }
 
@@ -360,6 +502,9 @@ func scanAngularRoutes(content, file string, add func(method, path, file string,
 	}
 	for _, re := range patterns {
 		for _, m := range re.FindAllStringSubmatchIndex(content, -1) {
+			if insideRouteStringLiteral(content, m[0]) {
+				continue
+			}
 			path := content[m[2]:m[3]]
 			add("ANY", "/"+strings.TrimPrefix(path, "/"), file, lineAt(content, m[0]), "regex-heuristic", "Angular Router", "high")
 		}
@@ -480,6 +625,7 @@ func remixRoutePath(relPath string) string {
 }
 
 func scanServerMethods(content string) []string {
+	content = stripRouteComments(content)
 	var methods []string
 	known := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}
 	for _, m := range known {

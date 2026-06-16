@@ -132,4 +132,7 @@ func TestEnrichGoNoopOutsideModule(t *testing.T) {
 	if added != 0 || g.Precise {
 		t.Errorf("outside a Go module EnrichGo must be a no-op, got added=%d precise=%v", added, g.Precise)
 	}
+	if len(g.PrecisionNotes) == 0 {
+		t.Fatal("outside a Go module should record a precision note")
+	}
 }

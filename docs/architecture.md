@@ -51,9 +51,10 @@ them makes the rest of the code predictable.
    agree.
 
 5. **Never silently clobber a user's config.** The installer merges into existing agent
-   configs, is idempotent (re-running reports `already-present`), preserves file
-   permissions and TOML comments, and backs up any config it cannot parse to
-   `<path>.onboard-bak` (`internal/agents/agent_config.go`).
+   configs, is idempotent when current (re-running reports `already-present`), refreshes
+   stale onboard command paths when the binary moved, preserves file permissions and TOML
+   comments, and backs up any config it cannot parse to `<path>.onboard-bak`
+   (`internal/agents/agent_config.go`).
 
 ## Component map
 
@@ -65,7 +66,7 @@ flowchart TD
     root --> install["cmd/install.go + init.go<br/>onboard install / init"]
     root --> skillscmd["cmd/skills.go<br/>onboard skills"]
 
-    serve --> srv["internal/server<br/>(*mcp.Server — 15 tools)"]
+    serve --> srv["internal/server<br/>(*mcp.Server — 18 tools)"]
     srv --> toolsSkills["tools_skills.go<br/>list_skills, get_skill"]
     srv --> recon["tools_recon.go<br/>recon"]
     srv --> graphTools["tools_graph.go · tools_repomap.go<br/>tools_context.go · tools_history.go<br/>trace_flow, impact, repo_map,<br/>context_pack, history"]
@@ -104,13 +105,13 @@ flowchart TD
 | Package | Role |
 |---------|------|
 | `main.go` | Entry point; calls `cmd.Execute()`. |
-| `cmd/` | Cobra CLI: `root`, `serve`, `install`, `init`, `skills`. Holds the `-ldflags`-stamped `version`/`commit`/`date` vars. |
-| `internal/server/` | The MCP server. `server.go` constructs `*mcp.Server` and registers all 15 tools; `tools_*.go` implement them; `graph_index.go` holds the shared per-root graph cache (`indexGraph`); `sqlddl.go` and `manifests.go` are the parsers behind `schema`/`deps`; `map_render.go` is `render_map`'s Mermaid/HTML rendering; `resources.go`/`prompts.go` add the resource and prompt surfaces. |
-| `internal/skills/` | Embedded skill bundles (`//go:embed all:assets`) and a deliberately naive frontmatter parser. |
+| `cmd/` | Cobra CLI: `root`, `serve`, `install`, `uninstall`, `init`, `doctor`, `skills`. Holds the `-ldflags`-stamped `version`/`commit`/`date` vars. |
+| `internal/server/` | The MCP server. `server.go` constructs `*mcp.Server` and registers all 18 tools; `tools_*.go` implement them; `graph_index.go` holds the shared per-root graph cache (`indexGraph`); `sqlddl.go` and `manifests.go` are the parsers behind `schema`/`deps`; `map_render.go` is `render_map`'s Mermaid/HTML rendering; `resources.go`/`prompts.go` add the resource and prompt surfaces. |
+| `internal/skills/` | Embedded skill bundles (`//go:embed assets`) and a deliberately naive frontmatter parser. |
 | `internal/providers/` | The code-graph engine: the `Provider` interface, the `Builtin` tree-sitter provider, the `Null` regex fallback, the `Graph`/`Symbol` model with name+scope resolution, PageRank ranking (`pagerank.go`), and opt-in semantic precision layers for Go (`goprecision.go`) and Rust (`rustprecision.go`). |
 | `internal/guide/` | The durable, SHA-tagged guide cache: path resolution, header format, read/write. |
 | `internal/git/` | Thin wrappers over the `git` CLI: availability, common-dir, HEAD SHA, branch, `diff --name-status`, and per-file churn/ownership history. |
-| `internal/agents/` | The installer: the agent registry/detection (`agents.go`) and the never-clobber JSON/TOML MCP-config writers (`agent_config.go`), for seven agents. |
+| `internal/agents/` | The installer: the agent registry/detection (`agents.go`) and the never-clobber JSON/TOML MCP-config writers (`agent_config.go`), for eight agents. |
 | `internal/ignore/` | Single source of truth for the dependency/build directories that code-walking tools skip. |
 | `docs/` | This documentation. |
 
@@ -138,14 +139,15 @@ as a user-role message so a client drops straight into the walkthrough workflow.
    ["serve"]`.
 2. The agent launches `onboard serve`. By default this speaks MCP over **stdio**
    (`internal/server` via `&mcp.StdioTransport{}`, `cmd/serve.go`). With `--http
-   :8080` it instead serves **Streamable HTTP** at `/mcp` (`cmd/serve.go`) for
+   `127.0.0.1:8080` it instead serves **Streamable HTTP** at `/mcp` (`cmd/serve.go`) for
    hosted or CI use.
 3. The agent calls tools. Read-only structural tools (`recon`, `trace_flow`, `impact`,
    `repo_map`, `context_pack`, `history`, `deps`, `schema`, `routes`, `render_map`) analyze
-   the repo on demand. The code graph is **indexed once per repo root and cached in memory**
-   for the server's lifetime (`refresh: true` forces a re-index — `internal/server/graph_index.go`),
-   and is additionally **persisted to a content-hashed on-disk cache** inside `.git` so cold
-   starts re-parse only changed files (`internal/providers/cache.go`,
+   the repo on demand. The code graph is **cached in memory per repo root** with a
+   32-entry / 30-minute bound (`refresh: true` forces a re-index —
+   `internal/server/graph_index.go`), and is additionally **persisted to a content-hashed
+   on-disk cache** inside `.git` so cold starts re-parse only changed files
+   (`internal/providers/cache.go`,
    [code-graph.md](code-graph.md#persistent-incremental-index)).
 4. For longitudinal work, the agent persists a `codebase-walkthrough.md` guide via
    `guide_write`, tagged with the current HEAD SHA, and later uses `guide_read` /
@@ -187,7 +189,7 @@ See [code-graph.md](code-graph.md) for the full algorithm and accuracy limits.
 | Transport | When | Wiring |
 |-----------|------|--------|
 | **stdio** | Default; what interactive agents launch. | `s.Run(ctx, &mcp.StdioTransport{})` — `cmd/serve.go`. |
-| **Streamable HTTP** | `onboard serve --http :8080`; hosted / headless / CI. | `mcp.NewStreamableHTTPHandler` mounted at `/mcp`, served by a `net/http` server with a 5s `ReadHeaderTimeout` — `cmd/serve.go`. Default options: stateful sessions, localhost protection on. |
+| **Streamable HTTP** | `onboard serve --http 127.0.0.1:8080`; local headless / CI harnesses. For hosted/shared use, set `--http-token` / `ONBOARD_HTTP_TOKEN` and put it behind TLS and network controls. | `mcp.NewStreamableHTTPHandler` mounted at `/mcp`, served by a `net/http` server with read-header/read/write/idle timeouts, graceful shutdown, a request body cap, optional bearer auth, stderr request logs, and `/metrics` counters — `cmd/serve.go`. Default SDK options: stateful sessions, localhost protection on. |
 
 The *same* `*mcp.Server` (same tools, resources, prompt) runs over both transports; only
 the transport differs. Unit tests exercise it over in-memory transports and the HTTP

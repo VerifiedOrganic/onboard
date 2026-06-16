@@ -69,16 +69,13 @@ is the single highest value-to-effort addition.
 > Warm index of this repo: ~80 ms → ~3 ms. See
 > [code-graph.md](code-graph.md#persistent-incremental-index).
 
-**Gap.** The graph is rebuilt in memory once per server lifetime and cached per root
-(`indexGraph`, `tools_graph.go`). Large repos pay a full re-index on every cold start,
-and `refresh` re-indexes everything. Stack graphs are *file-incremental*; SCIP is a
-persisted format — both avoid repeated whole-repo work.
+**Shipped baseline.** The graph now has both a content-hashed on-disk file cache and a
+bounded in-memory graph cache (32 entries / 30 minutes). `refresh` still intentionally
+re-indexes the requested graph.
 
-**Proposal.** Persist the indexed graph to disk (e.g. `.git/onboard/graph.json` next to the
-guide cache, so it's never committed) keyed by per-file content hashes. On startup, load it;
-on `refresh` or a detected change, re-tag only files whose hash changed (drive the changed
-set from `git diff` when available, falling back to mtime/hash). This makes the graph
-file-incremental like stack graphs without leaving pure Go.
+**Remaining proposal.** Make `refresh` itself file-incremental by driving the changed set
+from `git diff` when available, falling back to mtime/hash. This would avoid repeated
+whole-repo work on very large repos while keeping the pure-Go engine.
 
 **Why it fits.** Pure-Go, reuses `internal/git` and the existing guide-cache storage
 convention. Big win for large repos and repeated sessions.
@@ -245,10 +242,11 @@ across roots where names match. Keep per-root caching.
 
 ### 3.3 Hosted-mode hardening
 
-**Gap.** `onboard serve --http` mounts the handler with no auth, logging, or metrics
-(`cmd/serve.go`); fine for localhost, thin for shared/CI deployment.
-**Proposal.** Optional bearer-token auth, structured `slog` request logging, and basic
-metrics — all off by default so stdio/localhost stays zero-config.
+**Shipped baseline.** `onboard serve --http` has optional bearer-token auth
+(`--http-token` / `ONBOARD_HTTP_TOKEN`), read/write/idle timeouts, a request body cap,
+graceful shutdown, structured `slog` request logging, and basic `/metrics` counters.
+**Remaining proposal.** Add hosted-mode deployment examples. Keep stdio/localhost
+zero-config.
 **Effort:** S–M. **Risk:** low.
 
 ### 3.4 Guide as a publishable artifact

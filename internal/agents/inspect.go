@@ -161,5 +161,5 @@ func tomlOnboardCommand(path string) (string, bool) {
 
 var (
 	tomlNextTableHeader = regexp.MustCompile(`(?m)^[ \t]*\[`)
-	tomlCommandValue    = regexp.MustCompile(`command\s*=\s*("(?:[^"\\]|\\.)*")`)
+	tomlCommandValue    = regexp.MustCompile(`(?m)^[ \t]*command[ \t]*=\s*("(?:[^"\\]|\\.)*")`)
 )

@@ -142,13 +142,17 @@ type Result struct {
 	Agent            string
 	SkillFiles       int
 	SkillDirsCleaned int
-	ConfigAction     string // merged | appended | already-present | skipped
+	SkillDirsRemoved int
+	ConfigAction     string // merged | appended | refreshed | already-present | skipped
+	ConfigPath       string
+	SkillsDir        string
+	BackupPath       string
 }
 
 // Install writes the skill bundle and registers the onboard MCP server in the
 // agent's config. binPath must be the absolute path to this binary.
 func Install(a Agent, binPath string) (Result, error) {
-	res := Result{Agent: a.Name}
+	res := Result{Agent: a.Name, ConfigPath: a.ConfigPath, SkillsDir: a.SkillsDir}
 
 	if a.SkillsDir != "" {
 		n, removed, err := installSkills(a.SkillsDir)
@@ -159,11 +163,67 @@ func Install(a Agent, binPath string) (Result, error) {
 		res.SkillDirsCleaned = removed
 	}
 
-	action, err := registerMCP(a, binPath)
+	cfg, err := registerMCP(a, binPath)
 	if err != nil {
 		return res, err
 	}
-	res.ConfigAction = action
+	res.ConfigAction = cfg.Action
+	res.BackupPath = cfg.BackupPath
+	return res, nil
+}
+
+// PreviewInstall reports what Install would do without writing skill or config files.
+func PreviewInstall(a Agent, binPath string) (Result, error) {
+	res := Result{Agent: a.Name, ConfigPath: a.ConfigPath, SkillsDir: a.SkillsDir}
+	if a.SkillsDir != "" {
+		n, err := countSkillFiles()
+		if err != nil {
+			return res, err
+		}
+		res.SkillFiles = n
+	}
+	cfg, err := planRegisterMCP(a, binPath)
+	if err != nil {
+		return res, err
+	}
+	res.ConfigAction = cfg.Action
+	res.BackupPath = cfg.BackupPath
+	return res, nil
+}
+
+// Uninstall removes onboard's MCP config entry and embedded skill directories for one agent.
+func Uninstall(a Agent) (Result, error) {
+	res := Result{Agent: a.Name, ConfigPath: a.ConfigPath, SkillsDir: a.SkillsDir}
+	if a.SkillsDir != "" {
+		removed, err := uninstallSkills(a.SkillsDir)
+		if err != nil {
+			return res, err
+		}
+		res.SkillDirsRemoved = removed
+	}
+	cfg, err := unregisterMCP(a)
+	if err != nil {
+		return res, err
+	}
+	res.ConfigAction = cfg.Action
+	return res, nil
+}
+
+// PreviewUninstall reports what Uninstall would remove without modifying files.
+func PreviewUninstall(a Agent) (Result, error) {
+	res := Result{Agent: a.Name, ConfigPath: a.ConfigPath, SkillsDir: a.SkillsDir}
+	if a.SkillsDir != "" {
+		removed, err := countInstalledSkillDirs(a.SkillsDir)
+		if err != nil {
+			return res, err
+		}
+		res.SkillDirsRemoved = removed
+	}
+	cfg, err := planUnregisterMCP(a)
+	if err != nil {
+		return res, err
+	}
+	res.ConfigAction = cfg.Action
 	return res, nil
 }
 
@@ -200,6 +260,83 @@ func installSkills(skillsDir string) (int, int, error) {
 		return count, removed, err
 	}
 	return count, removed, nil
+}
+
+func countSkillFiles() (int, error) {
+	all, err := skills.List()
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, sk := range all {
+		if sk.Name == "" || strings.ContainsAny(sk.Name, `/\`) || strings.Contains(sk.Name, "..") {
+			continue
+		}
+		files, err := sk.Files()
+		if err != nil {
+			return count, err
+		}
+		count += len(files)
+	}
+	return count, nil
+}
+
+func uninstallSkills(skillsDir string) (int, error) {
+	dirs, err := onboardSkillDirs(skillsDir)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, dir := range dirs {
+		if !exists(dir) {
+			continue
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+func countInstalledSkillDirs(skillsDir string) (int, error) {
+	dirs, err := onboardSkillDirs(skillsDir)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, dir := range dirs {
+		if exists(dir) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func onboardSkillDirs(skillsDir string) ([]string, error) {
+	all, err := skills.List()
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	seen := map[string]bool{}
+	add := func(name string) {
+		if name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") || seen[name] {
+			return
+		}
+		seen[name] = true
+		dirs = append(dirs, filepath.Join(skillsDir, name))
+	}
+	for _, sk := range all {
+		add(sk.Name)
+	}
+	for legacy := range skills.LegacyAliases() {
+		legacyDir := filepath.Join(skillsDir, legacy)
+		if looksLikeLegacyOnboardSkill(legacyDir, legacy) {
+			add(legacy)
+		}
+	}
+	return dirs, nil
 }
 
 func cleanupLegacySkillDirs(skillsDir string) (int, error) {

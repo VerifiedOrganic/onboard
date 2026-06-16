@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"go/token"
 	"os"
 	"os/exec"
@@ -38,14 +39,29 @@ const goPrecisionTimeout = 90 * time.Second
 // non-fatal: any missing capability, load error, or analysis panic leaves g untouched and
 // returns (0, nil). Callers treat a precise result as a strict upgrade when present.
 func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
-	if g == nil || len(g.Defs) == 0 || !goAvailable(root) {
+	if g == nil || len(g.Defs) == 0 {
+		return 0, nil
+	}
+	if !goAvailable(root) {
+		if graphHasLang(g, "go") {
+			g.AddPrecisionNote("Go precision unavailable: `go` command or go.mod not found")
+		}
 		return 0, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, goPrecisionTimeout)
 	defer cancel()
 
-	edges := goPreciseEdges(ctx, root)
+	edges, note := goPreciseEdges(ctx, root)
+	if note != "" {
+		g.AddPrecisionNote(note)
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		g.AddPrecisionNote(fmt.Sprintf("Go precision timed out after %s", goPrecisionTimeout))
+	}
 	if len(edges) == 0 {
+		if note == "" && ctx.Err() == nil {
+			g.AddPrecisionNote("Go precision returned zero semantic call edges")
+		}
 		return 0, nil
 	}
 
@@ -79,6 +95,7 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 	if g.ProvenEdges == nil {
 		g.ProvenEdges = map[string]bool{}
 	}
+	edgesSeen := edgeSetFromGraph(g)
 	added := 0
 	proved := false
 	for _, e := range edges {
@@ -96,19 +113,9 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 		}
 		proved = true
 		g.ProvenEdges[key] = true
-		// Was this edge already in the syntactic graph, or is it newly resolved?
-		isNew := true
-		for _, c := range g.Forward[caller] {
-			if c == callee {
-				isNew = false
-				break
-			}
-		}
-		if isNew {
+		if edgesSeen.add(g, caller, callee) {
 			added++
 		}
-		g.Forward[caller] = appendUnique(g.Forward[caller], callee)
-		g.Reverse[callee] = appendUnique(g.Reverse[callee], caller)
 	}
 	if proved {
 		g.MarkPrecision("go")
@@ -135,10 +142,11 @@ func posKey(slashFile string, line int, name string) string {
 // edges (VTA refined over CHA — far less interface-dispatch noise than CHA alone). It
 // recovers from any panic in the analysis libraries and returns nil on any problem, so the
 // caller can treat precision as best-effort.
-func goPreciseEdges(ctx context.Context, root string) (out []posEdge) {
+func goPreciseEdges(ctx context.Context, root string) (out []posEdge, note string) {
 	defer func() {
-		if recover() != nil {
+		if r := recover(); r != nil {
 			out = nil // a panic in go/ssa or vta must never crash the server
+			note = fmt.Sprintf("Go precision panicked and was skipped: %v", r)
 		}
 	}()
 
@@ -151,8 +159,11 @@ func goPreciseEdges(ctx context.Context, root string) (out []posEdge) {
 		Tests:   false,
 	}
 	pkgs, err := packages.Load(cfg, "./...")
-	if err != nil || len(pkgs) == 0 {
-		return nil
+	if err != nil {
+		return nil, "Go precision package load failed: " + err.Error()
+	}
+	if len(pkgs) == 0 {
+		return nil, "Go precision package load returned no packages"
 	}
 
 	prog, _ := ssautil.AllPackages(pkgs, ssa.InstantiateGenerics)
@@ -185,7 +196,7 @@ func goPreciseEdges(ctx context.Context, root string) (out []posEdge) {
 			})
 		}
 	}
-	return out
+	return out, ""
 }
 
 // fnPos returns the absolute file and 1-based line of a function's name identifier, or

@@ -91,7 +91,7 @@ When only test files changed, you typically revisit only the Behavioral Map. Whe
 This is the half of maintenance that silently rots a guide. Be as diligent pruning as adding.
 
 - **Deleted file (`D`)**: search the guide body for the path and the symbols it defined. Remove every pointer in Where to Look, Key Entry Points, and Directory Map. If the Behavioral Map claimed a behavior that lived only in that file, remove the claim. If a Request Lifecycle trace passed through it, re-trace the surviving path or annotate the break.
-- **Renamed file (`R...`, shown as `old new`)**: repoint every reference from the old path to the new one. Treat the content as possibly modified too — read the new file and apply normal modify rules.
+- **Renamed file (`R...`)**: use `old_path` → `path` from `guide_delta` to repoint every reference from the old path to the new one. Treat the content as possibly modified too — read the new file and apply normal modify rules.
 - **Removed entry point**: drop it from Key Entry Points and from any Request Lifecycle trace that started there.
 
 A guide that points at files that no longer exist is worse than one missing a section. When in doubt, remove the stale pointer.

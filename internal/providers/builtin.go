@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -15,6 +16,8 @@ import (
 
 // Builtin is the pure-Go tree-sitter code-graph engine.
 type Builtin struct{}
+
+const maxIndexedFileBytes = 4 << 20
 
 // Name returns the provider identifier.
 func (Builtin) Name() string { return "builtin" }
@@ -70,6 +73,7 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*Graph, error) {
 	var hclEng *hclEngine
 	hclEngKnown := false
 	var reused, retagged int
+	var skippedLarge []string
 
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -94,6 +98,12 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*Graph, error) {
 			}
 		}
 		if entry == nil {
+			return nil
+		}
+		info, statErr := d.Info()
+		if statErr == nil && info.Size() > maxIndexedFileBytes {
+			rel, _ := filepath.Rel(root, p)
+			skippedLarge = append(skippedLarge, filepath.ToSlash(rel))
 			return nil
 		}
 		src, readErr := os.ReadFile(p)
@@ -211,6 +221,9 @@ func indexBuiltin(ctx context.Context, root, cachePath string) (*Graph, error) {
 
 	g := assembleGraph(perFile, root)
 	g.reused, g.retagged = reused, retagged
+	if len(skippedLarge) > 0 {
+		g.Note = fmt.Sprintf("Skipped %d file(s) larger than %d MiB during indexing: %s", len(skippedLarge), maxIndexedFileBytes>>20, strings.Join(skippedLarge, ", "))
+	}
 	if cachePath != "" {
 		saveDiskIndex(cachePath, fresh)
 	}
@@ -334,6 +347,7 @@ func assembleGraph(perFile map[string]fileData, _ string) *Graph {
 		refs = append(refs, fd.refs...)
 	}
 
+	edges := newGraphEdgeSet()
 	for _, r := range refs {
 		callee := r.lookup(defsByFileName, defsByDirName, defsByName, defsByFileRecvName, defsByDirRecvName, defsByRecvName, fileImports)
 		if callee == "" || callee == r.callerQName {
@@ -342,8 +356,7 @@ func assembleGraph(perFile map[string]fileData, _ string) *Graph {
 			}
 			continue
 		}
-		g.Forward[r.callerQName] = appendUnique(g.Forward[r.callerQName], callee)
-		g.Reverse[callee] = appendUnique(g.Reverse[callee], r.callerQName)
+		edges.add(g, r.callerQName, callee)
 	}
 
 	g.Langs = sortedKeys(langSet)

@@ -1,7 +1,7 @@
 # The skill system
 
 If the tools are *what onboard knows*, the skills are *how it teaches*. A skill is the
-playbook an agent follows to walk a developer through a codebase — and onboard ships five of
+playbook an agent follows to walk a developer through a codebase — and onboard ships six of
 them baked into the binary.
 
 A *skill* is a directory bundle: a `SKILL.md` (YAML frontmatter + markdown body) plus an
@@ -27,7 +27,7 @@ So the server and every installed agent always serve identical content. Editing 
 means editing the asset; rebuilding the binary re-embeds it; `onboard install` propagates
 it. (See the cautionary tale in [the frontmatter contract](#the-skillmd-frontmatter-contract).)
 
-## The five skills
+## The six skills
 
 Public skill identifiers are namespaced with `onboard-`. Agent skill directories are
 global and unscoped, so the prefix avoids collisions with user-installed skills and keeps
@@ -45,12 +45,13 @@ owns one capability:
 | **`onboard-guide-maintainer`** | The git-SHA delta loop that keeps an existing cached guide current with HEAD. | `guide_read/write/delta`, `recon` |
 | **`onboard-dependency-impact-analyzer`** | The per-change blast radius of one target ("what breaks if I change X"). | `impact`, `trace_flow` |
 | **`onboard-test-gap-and-risk-auditor`** | A standing, whole-repo risk register: untested paths, fragile seams, silent assumptions. | `recon`, `trace_flow`, `impact` |
+| **`onboard-infra-walkthrough`** | Top-down onboarding for Terraform, Terragrunt, and OpenTofu repositories. | `stacks`, `deps`, `dead_code`, `render_map` |
 
 The deliberate split: walkthrough **teaches**; cartographer **draws** durable diagrams
 (interactive HTML stays with walkthrough); onboard-guide-maintainer runs the **delta loop**;
-auditor produces a **standing whole-repo** register; analyzer computes **per-change**
-blast radius. The auditor (whole-repo, standing) and the analyzer (one-target, per-change)
-are kept distinct on purpose.
+infra walkthrough handles IaC repos; auditor produces a **standing whole-repo** register;
+analyzer computes **per-change** blast radius. The auditor (whole-repo, standing) and the
+analyzer (one-target, per-change) are kept distinct on purpose.
 
 Each skill body stays thin and pushes detail into one-level-deep `references/*.md` files
 (e.g. `onboard-codebase-walkthrough/references/{conversational,cached-guide,interactive-map,mcp-setup}.md`).

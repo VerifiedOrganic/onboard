@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/VerifiedOrganic/onboard/internal/git"
 	"github.com/VerifiedOrganic/onboard/internal/providers"
@@ -16,19 +17,40 @@ import (
 // on-disk index path, optional type-checked enrichment, and the small honesty/classification
 // helpers the tools share. Kept here, not in any one tool's file, because it is cross-cutting.
 
-// Indexing walks the whole repo, so cache the graph per root for the server's
-// lifetime. Callers pass refresh=true to rebuild after the tree changes.
+// Indexing walks the whole repo, so cache recent graphs per root/key. Callers pass
+// refresh=true to rebuild after the tree changes.
 var (
 	graphCacheMu sync.Mutex
-	graphCache   = map[string]*providers.Graph{}
+	graphCache   = map[string]graphCacheEntry{}
 	graphLocks   = map[string]*sync.Mutex{}
 )
+
+const (
+	graphCacheMaxEntries = 32
+	graphCacheTTL        = 30 * time.Minute
+)
+
+type graphCacheEntry struct {
+	graph    *providers.Graph
+	lastUsed time.Time
+}
 
 func cachedGraph(root string) (*providers.Graph, bool) {
 	graphCacheMu.Lock()
 	defer graphCacheMu.Unlock()
-	g, ok := graphCache[root]
-	return g, ok
+	e, ok := graphCache[root]
+	if !ok {
+		return nil, false
+	}
+	now := time.Now()
+	if now.Sub(e.lastUsed) > graphCacheTTL {
+		delete(graphCache, root)
+		delete(graphLocks, root)
+		return nil, false
+	}
+	e.lastUsed = now
+	graphCache[root] = e
+	return e.graph, true
 }
 
 func rootLock(root string) *sync.Mutex {
@@ -40,6 +62,31 @@ func rootLock(root string) *sync.Mutex {
 		graphLocks[root] = l
 	}
 	return l
+}
+
+func storeGraph(root string, g *providers.Graph) {
+	graphCacheMu.Lock()
+	defer graphCacheMu.Unlock()
+	now := time.Now()
+	graphCache[root] = graphCacheEntry{graph: g, lastUsed: now}
+	for key, entry := range graphCache {
+		if now.Sub(entry.lastUsed) > graphCacheTTL {
+			delete(graphCache, key)
+			delete(graphLocks, key)
+		}
+	}
+	for len(graphCache) > graphCacheMaxEntries {
+		var oldestKey string
+		var oldest time.Time
+		for key, entry := range graphCache {
+			if oldestKey == "" || entry.lastUsed.Before(oldest) {
+				oldestKey = key
+				oldest = entry.lastUsed
+			}
+		}
+		delete(graphCache, oldestKey)
+		delete(graphLocks, oldestKey)
+	}
 }
 
 func indexGraph(ctx context.Context, root string, refresh, precise bool) (*providers.Graph, error) {
@@ -83,9 +130,7 @@ func indexGraph(ctx context.Context, root string, refresh, precise bool) (*provi
 		_, _ = providers.EnrichGo(ctx, root, g)
 		_, _ = providers.EnrichRust(ctx, root, g)
 	}
-	graphCacheMu.Lock()
-	graphCache[key] = g
-	graphCacheMu.Unlock()
+	storeGraph(key, g)
 	return g, nil
 }
 

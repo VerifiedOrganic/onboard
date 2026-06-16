@@ -9,6 +9,8 @@ import (
 	"github.com/VerifiedOrganic/onboard/internal/agents"
 )
 
+var initDryRun bool
+
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Detect installed agents and wire onboard into each",
@@ -32,20 +34,28 @@ var initCmd = &cobra.Command{
 				continue
 			}
 			found++
-			res, err := agents.Install(a, bin)
+			var res agents.Result
+			if initDryRun {
+				res, err = agents.PreviewInstall(a, bin)
+			} else {
+				res, err = agents.Install(a, bin)
+			}
 			if err != nil {
 				fmt.Printf("  ✗ %-9s %v\n", a.Name, err)
 				failures++
 				continue
 			}
-			fmt.Printf("  ✓ %-9s config: %-15s skills: %d file(s)%s\n",
-				res.Agent, res.ConfigAction, res.SkillFiles, cleanupSuffix(res.SkillDirsCleaned))
+			printInstallResult(res, initDryRun)
 		}
 		if found == 0 {
 			fmt.Println("\nNo agents detected. Install one, or use `onboard install --agent <name>` to force a target.")
 			return nil
 		}
-		fmt.Println("\nDone. Restart your agent(s) to pick up the onboard MCP server.")
+		if initDryRun {
+			fmt.Println("\nDry run only; no files were changed.")
+		} else {
+			fmt.Println("\nDone. Restart your agent(s) to pick up the onboard MCP server.")
+		}
 		if failures > 0 {
 			return fmt.Errorf("%d install(s) failed", failures)
 		}
@@ -54,5 +64,6 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
+	initCmd.Flags().BoolVar(&initDryRun, "dry-run", false, "show planned config and skill changes without writing files")
 	rootCmd.AddCommand(initCmd)
 }

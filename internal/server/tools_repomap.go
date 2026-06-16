@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -93,7 +95,7 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 	}
 	churn := map[string]int{}
 	if weight > 0 {
-		churn = fileChurn(root)
+		churn = fileChurn(root, in.Refresh)
 	}
 	blended := weight > 0 && len(churn) > 0
 
@@ -237,22 +239,59 @@ func blendScore(pr, maxPR float64, commits int, maxLogChurn, weight float64, ble
 	return (1-weight)*centrality + weight*churn
 }
 
+const churnCacheTTL = 5 * time.Minute
+
+type churnCacheEntry struct {
+	expires time.Time
+	values  map[string]int
+}
+
+var churnCache = struct {
+	sync.Mutex
+	entries map[string]churnCacheEntry
+}{entries: map[string]churnCacheEntry{}}
+
 // fileChurn returns per-file commit counts keyed by slash-normalized repo-relative path,
 // or an empty map outside a git work tree (so callers degrade cleanly to no churn signal).
 // Shared by repo_map's ranking blend and context_pack's relevance scoring.
-func fileChurn(root string) map[string]int {
+func fileChurn(root string, refresh bool) map[string]int {
+	return fileChurnWithMax(root, churnScanCommits, refresh)
+}
+
+func fileChurnWithMax(root string, maxCommits int, refresh bool) map[string]int {
+	key := fmt.Sprintf("%s\x00%d", root, maxCommits)
+	now := time.Now()
+	if !refresh {
+		churnCache.Lock()
+		if ent, ok := churnCache.entries[key]; ok && now.Before(ent.expires) {
+			out := copyIntMap(ent.values)
+			churnCache.Unlock()
+			return out
+		}
+		churnCache.Unlock()
+	}
+
 	churn := map[string]int{}
-	if !git.Available(root) {
-		return churn
+	if git.Available(root) {
+		if hist, err := git.History(root, maxCommits); err == nil {
+			for _, fs := range hist {
+				churn[filepath.ToSlash(fs.Path)] = fs.Commits
+			}
+		}
 	}
-	hist, err := git.History(root, churnScanCommits)
-	if err != nil {
-		return churn
-	}
-	for _, fs := range hist {
-		churn[filepath.ToSlash(fs.Path)] = fs.Commits
-	}
+
+	churnCache.Lock()
+	churnCache.entries[key] = churnCacheEntry{expires: now.Add(churnCacheTTL), values: copyIntMap(churn)}
+	churnCache.Unlock()
 	return churn
+}
+
+func copyIntMap(in map[string]int) map[string]int {
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func clamp01(f float64) float64 {
