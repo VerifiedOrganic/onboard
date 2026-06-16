@@ -12,7 +12,7 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/VerifiedOrganic/onboard/internal/git"
-	"github.com/VerifiedOrganic/onboard/internal/ignore"
+	"github.com/VerifiedOrganic/onboard/internal/scan"
 )
 
 // reconHotspotCommits bounds the history recon scans for its quick hotspot summary; the
@@ -91,7 +91,7 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if p != root && shouldSkipDir(name) {
+			if p != root && scan.ShouldSkipDir(name) {
 				return fs.SkipDir
 			}
 			return nil
@@ -207,7 +207,7 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 		out.Tooling = addUnique(out.Tooling, "GitHub Actions")
 	}
 	if stackSet["Rust"] {
-		if cargo, ok := loadCargoMetadata(ctx, root); ok {
+		if cargo, ok := scan.LoadCargoMetadata(ctx, root); ok {
 			out.RustTargets = cargoTargetSummaries(cargo)
 			for _, md := range cargo {
 				for _, target := range md.Targets {
@@ -317,13 +317,19 @@ func topHotspots(hist []git.FileStat, n int) []string {
 	return out
 }
 
-// shouldSkipDir prunes the shared dependency/build directories plus dotdirs, but keeps
-// .github (recon detects CI workflows there).
-func shouldSkipDir(name string) bool {
-	if ignore.Dir(name) {
-		return true
+func cargoTargetSummaries(metadata map[string]scan.ManifestDeps) []string {
+	var out []string
+	for _, md := range metadata {
+		for _, target := range md.Targets {
+			kind := strings.Join(target.Kind, ",")
+			if kind == "" {
+				kind = "target"
+			}
+			out = append(out, md.Module+":"+target.Name+" ("+kind+") "+target.SrcPath)
+		}
 	}
-	return strings.HasPrefix(name, ".") && name != ".github"
+	sort.Strings(out)
+	return out
 }
 
 func dirTree(root string, maxDepth int) []string {
@@ -339,7 +345,7 @@ func dirTree(root string, maxDepth int) []string {
 		if rel == "." {
 			return nil
 		}
-		if shouldSkipDir(d.Name()) {
+		if scan.ShouldSkipDir(d.Name()) {
 			return fs.SkipDir
 		}
 		if len(strings.Split(rel, string(filepath.Separator))) > maxDepth {

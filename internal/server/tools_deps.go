@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/VerifiedOrganic/onboard/internal/scan"
 )
 
 // deps extracts the EXTERNAL dependency graph straight from manifests — a deterministic fact,
@@ -26,45 +28,12 @@ type depsInput struct {
 	Format string `json:"format,omitempty" jsonschema:"set to \"mermaid\" to also return a dependency flowchart; default returns structured data only"`
 }
 
-type dependency struct {
-	Name      string `json:"name"`
-	Version   string `json:"version,omitempty"`
-	Kind      string `json:"kind,omitempty"`   // normal | dev | build | peer | optional
-	Target    string `json:"target,omitempty"` // target cfg for platform-specific deps
-	Optional  bool   `json:"optional,omitempty"`
-	Dev       bool   `json:"dev,omitempty"`       // development-only dependency
-	Workspace bool   `json:"workspace,omitempty"` // true if it is a local workspace package
-}
-
-type rustTarget struct {
-	Name       string   `json:"name"`
-	Kind       []string `json:"kind,omitempty"`
-	CrateTypes []string `json:"crate_types,omitempty"`
-	SrcPath    string   `json:"src_path,omitempty"`
-	Edition    string   `json:"edition,omitempty"`
-}
-
-type manifestDeps struct {
-	Manifest              string            `json:"manifest"`  // repo-relative path
-	Ecosystem             string            `json:"ecosystem"` // Go, JavaScript/TypeScript (npm), ...
-	Module                string            `json:"module,omitempty"`
-	Direct                []dependency      `json:"direct"`
-	Indirect              int               `json:"indirect,omitempty"` // count of indirect deps (go.mod)
-	Targets               []rustTarget      `json:"targets,omitempty"`  // Cargo targets, when Cargo metadata is available
-	WorkspaceDependencies []string          `json:"workspace_dependencies,omitempty"`
-	PackageManager        string            `json:"package_manager,omitempty"`
-	Workspaces            []string          `json:"workspaces,omitempty"`
-	Scripts               map[string]string `json:"scripts,omitempty"`
-	Engines               map[string]string `json:"engines,omitempty"`
-	DetectedTools         []string          `json:"detected_tools,omitempty"`
-}
-
 type depsOutput struct {
-	Manifests   []manifestDeps `json:"manifests"`
-	TotalDirect int            `json:"total_direct"`
-	Mermaid     string         `json:"mermaid,omitempty"`
-	Truncated   bool           `json:"truncated,omitempty"`
-	Note        string         `json:"note,omitempty"`
+	Manifests   []scan.ManifestDeps `json:"manifests"`
+	TotalDirect int                 `json:"total_direct"`
+	Mermaid     string              `json:"mermaid,omitempty"`
+	Truncated   bool                `json:"truncated,omitempty"`
+	Note        string              `json:"note,omitempty"`
 }
 
 func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
@@ -79,7 +48,7 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if p != root && shouldSkipDir(d.Name()) {
+			if p != root && scan.ShouldSkipDir(d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
@@ -88,14 +57,14 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 			out.Truncated = true
 			return fs.SkipDir
 		}
-		md, ok := parseManifest(root, p, d.Name())
+		md, ok := scan.ParseManifest(root, p, d.Name())
 		if ok {
 			out.Manifests = append(out.Manifests, md)
 		}
 		return nil
 	})
 
-	if cargo, ok := loadCargoMetadata(ctx, root); ok {
+	if cargo, ok := scan.LoadCargoMetadata(ctx, root); ok {
 		for i := range out.Manifests {
 			if md, found := cargo[out.Manifests[i].Manifest]; found {
 				out.Manifests[i] = md
@@ -103,7 +72,6 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 		}
 	}
 
-	// Build local workspace dependency graph
 	pkgToManifest := map[string]string{}
 	for _, m := range out.Manifests {
 		if m.Module != "" {
@@ -147,12 +115,7 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 	return out, nil
 }
 
-// Per-ecosystem manifest parsing (parseManifest, parseGoMod, parsePackageJSON,
-// parseRequirements, parseCargoToml, and helpers) lives in manifests.go.
-
-// renderDepsMermaid draws a flowchart of each manifest's module pointing at its direct
-// dependencies, capping total dependency nodes so the diagram stays legible.
-func renderDepsMermaid(manifests []manifestDeps) (string, bool) {
+func renderDepsMermaid(manifests []scan.ManifestDeps) (string, bool) {
 	var b strings.Builder
 	b.WriteString("flowchart LR\n")
 	shown, truncated := 0, false
