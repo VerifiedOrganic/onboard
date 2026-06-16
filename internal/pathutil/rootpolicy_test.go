@@ -20,8 +20,12 @@ func TestRootPolicyAllowsListedRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != nested {
-		t.Fatalf("ResolveRoot = %q, want %q", got, nested)
+	want, err := filepath.EvalSymlinks(nested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ResolveRoot = %q, want %q", got, want)
 	}
 }
 
@@ -30,6 +34,24 @@ func TestRootPolicyRejectsOutsideAllowlist(t *testing.T) {
 	other := t.TempDir()
 	p := pathutil.NewRootPolicy(base)
 	_, err := p.ResolveRoot(other)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !apperrors.Is(err, apperrors.ErrRootNotAllowed) {
+		t.Fatalf("err = %v, want ErrRootNotAllowed", err)
+	}
+}
+
+func TestRootPolicyRejectsSymlinkEscape(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	p := pathutil.NewRootPolicy(base)
+	_, err := p.ResolveRoot(link)
 	if err == nil {
 		t.Fatal("expected error")
 	}

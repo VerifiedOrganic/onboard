@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"regexp"
 	"strings"
 )
@@ -100,10 +101,7 @@ func renderMapHTML(topic string, nodes []mapNode, edges []mapEdge) string {
 }
 
 func htmlEscape(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	return s
+	return html.EscapeString(s)
 }
 
 // mapHTMLTemplate is a self-contained interactive map with no network dependencies.

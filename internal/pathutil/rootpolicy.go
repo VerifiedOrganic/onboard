@@ -22,6 +22,9 @@ func NewRootPolicy(allowed ...string) RootPolicy {
 			continue
 		}
 		if abs, err := filepath.Abs(a); err == nil {
+			if canonical, err := filepath.EvalSymlinks(abs); err == nil {
+				abs = canonical
+			}
 			out = append(out, abs)
 		}
 	}

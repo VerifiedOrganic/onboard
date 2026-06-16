@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -34,7 +35,10 @@ and network controls. Set --http-token or ONBOARD_HTTP_TOKEN to require a bearer
 		defer stop()
 		var opts []server.Option
 		if serveHTTP != "" {
-			wd, _ := os.Getwd()
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("resolve working directory for HTTP root policy: %w", err)
+			}
 			opts = append(opts, server.WithRootPolicy(transport.RootPolicyFromEnv(wd)))
 			opts = append(opts, server.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil))))
 		}

@@ -37,8 +37,12 @@ func TestIntegrationRootPolicyAllowsListedRoot(t *testing.T) {
 	cs, ctx := connect(t, WithRootPolicy(pathutil.NewRootPolicy(allowed)))
 	var out reconOutput
 	callStructured(ctx, t, cs, "recon", map[string]any{"root": allowed}, &out)
-	if out.Root != allowed {
-		t.Fatalf("recon root = %q, want %q", out.Root, allowed)
+	want, err := filepath.EvalSymlinks(allowed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Root != want {
+		t.Fatalf("recon root = %q, want %q", out.Root, want)
 	}
 }
 
@@ -72,7 +76,11 @@ func TestResolveRootAllowsNestedUnderPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != nested {
-		t.Fatalf("resolveRoot = %q, want %q", got, nested)
+	want, err := filepath.EvalSymlinks(nested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("resolveRoot = %q, want %q", got, want)
 	}
 }

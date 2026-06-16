@@ -19,8 +19,12 @@ func TestRootPolicyFromEnvUsesAllowedWhenUnset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != cwd {
-		t.Fatalf("ResolveRoot = %q, want %q", got, cwd)
+	want, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ResolveRoot = %q, want %q", got, want)
 	}
 }
 
@@ -62,7 +66,11 @@ func TestRootPolicyFromEnvNestedPathAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != nested {
-		t.Fatalf("ResolveRoot = %q, want %q", got, nested)
+	want, err := filepath.EvalSymlinks(nested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ResolveRoot = %q, want %q", got, want)
 	}
 }

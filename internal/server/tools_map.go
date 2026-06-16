@@ -153,25 +153,11 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 }
 
 func resolveOutputPath(root, outputPath string) (string, error) {
-	if filepath.IsAbs(outputPath) {
-		rootAbs, err := filepath.Abs(root)
-		if err != nil {
-			return "", err
-		}
-		abs, err := filepath.Abs(outputPath)
-		if err != nil {
-			return "", err
-		}
-		rel, err := filepath.Rel(rootAbs, abs)
-		if err != nil {
-			return "", err
-		}
-		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("output_path %q must stay within repo root %q", outputPath, root)
-		}
-		return abs, nil
+	path, err := pathutil.JoinUnderRoot(root, outputPath)
+	if err != nil {
+		return "", fmt.Errorf("output_path %q must stay within repo root %q: %w", outputPath, root, err)
 	}
-	return pathutil.JoinUnderRoot(root, outputPath)
+	return path, nil
 }
 
 // deriveMap aggregates the file-level call graph to a directory-level dependency

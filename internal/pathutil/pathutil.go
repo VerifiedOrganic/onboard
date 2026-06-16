@@ -2,10 +2,10 @@
 package pathutil
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/VerifiedOrganic/onboard/internal/apperrors"
 )
@@ -23,33 +23,70 @@ func ResolveRoot(root string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve root: %w", err)
 	}
-	info, err := os.Stat(abs)
+	realPath, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve root: %w", err)
+	}
+	info, err := os.Stat(realPath)
 	if err != nil {
 		return "", fmt.Errorf("resolve root: %w", err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("%w: %q", apperrors.ErrRootNotDirectory, abs)
+		return "", fmt.Errorf("%w: %q", apperrors.ErrRootNotDirectory, realPath)
 	}
-	return abs, nil
+	return realPath, nil
 }
 
 // JoinUnderRoot joins rel to root and verifies the result stays within root.
 func JoinUnderRoot(root, rel string) (string, error) {
-	joined := filepath.Join(root, rel)
-	abs, err := filepath.Abs(joined)
-	if err != nil {
-		return "", err
-	}
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
 	}
-	relPath, err := filepath.Rel(rootAbs, abs)
+	rootReal, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return "", fmt.Errorf("resolve root: %w", err)
+	}
+	target := rel
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(rootReal, rel)
+	}
+	abs, err := filepath.Abs(target)
 	if err != nil {
 		return "", err
 	}
-	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+	realTarget, err := resolveExistingPrefix(abs)
+	if err != nil {
+		return "", err
+	}
+	if !underRoot(rootReal, realTarget) {
 		return "", fmt.Errorf("%w: %q escapes repo root %q", apperrors.ErrPathEscapesRoot, rel, root)
 	}
-	return abs, nil
+	return realTarget, nil
+}
+
+func resolveExistingPrefix(abs string) (string, error) {
+	existing := abs
+	var suffix []string
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return "", fmt.Errorf("resolve path: %w", os.ErrNotExist)
+		}
+		suffix = append(suffix, filepath.Base(existing))
+		existing = parent
+	}
+	realPath, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", err
+	}
+	for i := len(suffix) - 1; i >= 0; i-- {
+		realPath = filepath.Join(realPath, suffix[i])
+	}
+	return realPath, nil
 }

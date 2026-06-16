@@ -14,12 +14,16 @@ func TestResolveRootDefaultsToCwd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	want, err := filepath.EvalSymlinks(wd)
+	if err != nil {
+		t.Fatal(err)
+	}
 	got, err := pathutil.ResolveRoot("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != wd {
-		t.Fatalf("ResolveRoot(\"\") = %q, want %q", got, wd)
+	if got != want {
+		t.Fatalf("ResolveRoot(\"\") = %q, want %q", got, want)
 	}
 }
 
@@ -44,8 +48,29 @@ func TestJoinUnderRootAllowsNested(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(nested, "file.txt")
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(realRoot, "a", "b", "file.txt")
 	if got != want {
 		t.Fatalf("JoinUnderRoot = %q, want %q", got, want)
+	}
+}
+
+func TestJoinUnderRootRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	_, err := pathutil.JoinUnderRoot(root, filepath.Join("link", "file.txt"))
+	if err == nil {
+		t.Fatal("expected symlink escape error")
+	}
+	if !apperrors.Is(err, apperrors.ErrPathEscapesRoot) {
+		t.Fatalf("err = %v, want ErrPathEscapesRoot", err)
 	}
 }
