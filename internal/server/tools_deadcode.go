@@ -64,6 +64,9 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 
 	var orphans []orphan
 	for q, sym := range g.Defs {
+		if sym == nil {
+			continue
+		}
 		if sym.Lang == "hcl" {
 			// Terraform has its own deadness rules: resources and module calls
 			// exist for their side effects and are never "dead"; variables,

@@ -11,6 +11,7 @@ import (
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/VerifiedOrganic/onboard/internal/pathutil"
 	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
@@ -194,6 +195,9 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 func resolveSeeds(g *providers.Graph, seed string) []*providers.Symbol {
 	var exact []*providers.Symbol
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		if s.Name == seed || s.QName == seed {
 			exact = append(exact, s)
 		}
@@ -205,6 +209,9 @@ func resolveSeeds(g *providers.Graph, seed string) []*providers.Symbol {
 	slashed := filepath.ToSlash(seed)
 	var sub []*providers.Symbol
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		if strings.Contains(filepath.ToSlash(s.File), slashed) || strings.Contains(s.QName, seed) {
 			sub = append(sub, s)
 		}
@@ -271,6 +278,9 @@ func packScore(d int, pr, maxPR float64, commits int, maxLogChurn float64) float
 func defLinesByFile(g *providers.Graph) map[string][]int {
 	m := map[string][]int{}
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		m[s.File] = append(m[s.File], s.Line)
 	}
 	for f := range m {
@@ -287,7 +297,12 @@ func defLinesByFile(g *providers.Graph) map[string][]int {
 func extractSnippet(root, file string, startLine int, fileDefLines []int, cache map[string][]string) (string, int) {
 	lines, ok := cache[file]
 	if !ok {
-		data, err := os.ReadFile(filepath.Join(root, file))
+		path, err := pathutil.JoinUnderRoot(root, file)
+		if err != nil {
+			cache[file] = nil
+			return "", startLine
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			cache[file] = nil
 			return "", startLine

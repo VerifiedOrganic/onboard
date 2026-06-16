@@ -15,12 +15,11 @@ package providers
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/VerifiedOrganic/onboard/internal/ignore"
+	"github.com/VerifiedOrganic/onboard/internal/pathutil"
 )
 
 // Symbol is a definition discovered in the source.
@@ -53,6 +52,9 @@ type Symbol struct {
 // (HTMLRenderer.Render) so same-named methods on different types are legible, while a
 // plain function returns its bare name.
 func (s *Symbol) Display() string {
+	if s == nil {
+		return ""
+	}
 	if s.Recv != "" {
 		if strings.EqualFold(s.Lang, "rust") {
 			return s.Recv + "::" + s.Name
@@ -167,6 +169,9 @@ func (g *Graph) FindSymbols(query string) []*Symbol {
 	var exact, sub []*Symbol
 	seen := map[string]bool{}
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		switch {
 		case s.Name == query || s.QName == query || s.Display() == query:
 			exact = append(exact, s)
@@ -277,18 +282,7 @@ func normalizeRoot(root string) (string, error) {
 	if root == "" {
 		root = "."
 	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("root %q is not a directory", abs)
-	}
-	return abs, nil
+	return pathutil.ResolveRoot(root)
 }
 
 func skipDir(name string) bool {

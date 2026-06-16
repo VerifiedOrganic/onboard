@@ -2,37 +2,17 @@ package server
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/VerifiedOrganic/onboard/internal/git"
 	"github.com/VerifiedOrganic/onboard/internal/guide"
+	"github.com/VerifiedOrganic/onboard/internal/pathutil"
 )
 
 func resolveRoot(root string) (string, error) {
-	if root == "" {
-		var err error
-		root, err = os.Getwd()
-		if err != nil {
-			return "", err
-		}
-	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("root %q is not a directory", abs)
-	}
-	return abs, nil
+	return pathutil.ResolveRoot(root)
 }
 
 // --- guide_read ---

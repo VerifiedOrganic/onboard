@@ -118,6 +118,9 @@ func (g *Graph) expandSeeds(seeds []string) map[string]bool {
 		}
 		slashed := filepath.ToSlash(s)
 		for q, sym := range g.Defs {
+			if sym == nil {
+				continue
+			}
 			if filepath.ToSlash(sym.File) == slashed || sym.Name == s {
 				set[q] = true
 			}

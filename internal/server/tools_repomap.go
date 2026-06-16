@@ -113,6 +113,9 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 
 	ranked := make([]rankedSymbol, 0, len(g.Defs))
 	for q, sym := range g.Defs {
+		if sym == nil {
+			continue
+		}
 		commits := churn[filepath.ToSlash(sym.File)]
 		ranked = append(ranked, rankedSymbol{
 			QName:   q,

@@ -334,6 +334,9 @@ func assembleGraph(perFile map[string]fileData, _ string) *Graph {
 			fileImports[file] = fd.imports
 		}
 		for _, sym := range fd.defs {
+			if sym == nil {
+				continue
+			}
 			g.Defs[sym.QName] = sym
 			defsByName[sym.Name] = append(defsByName[sym.Name], sym.QName)
 			defsByFileName[sym.File+"\x00"+sym.Name] = append(defsByFileName[sym.File+"\x00"+sym.Name], sym.QName)

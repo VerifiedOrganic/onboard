@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/tools/go/callgraph/cha"
@@ -73,6 +74,9 @@ func EnrichGo(ctx context.Context, root string, g *Graph) (int, error) {
 	byPos := make(map[string]string, len(g.Defs))
 	byFileName := make(map[string][]string, len(g.Defs))
 	for q, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		f := filepath.ToSlash(s.File)
 		byPos[posKey(f, s.Line, s.Name)] = q
 		byFileName[f+"\x00"+s.Name] = append(byFileName[f+"\x00"+s.Name], q)
@@ -165,8 +169,22 @@ func goPreciseEdges(ctx context.Context, root string) (out []posEdge, note strin
 	if len(pkgs) == 0 {
 		return nil, "Go precision package load returned no packages"
 	}
+	var pkgErrs []string
+	for _, pkg := range pkgs {
+		for _, pe := range pkg.Errors {
+			pkgErrs = append(pkgErrs, pe.Error())
+		}
+	}
+	if len(pkgErrs) > 0 {
+		return nil, "Go precision package load had errors: " + strings.Join(pkgErrs, "; ")
+	}
 
-	prog, _ := ssautil.AllPackages(pkgs, ssa.InstantiateGenerics)
+	prog, ssaPkgs := ssautil.AllPackages(pkgs, ssa.InstantiateGenerics)
+	for i, sp := range ssaPkgs {
+		if sp == nil && i < len(pkgs) {
+			return nil, "Go precision SSA build failed for package " + pkgs[i].ID
+		}
+	}
 	prog.Build()
 
 	cg := vta.CallGraph(ssautil.AllFunctions(prog), cha.CallGraph(prog))

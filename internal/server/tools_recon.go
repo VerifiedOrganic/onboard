@@ -329,7 +329,10 @@ func shouldSkipDir(name string) bool {
 func dirTree(root string, maxDepth int) []string {
 	var out []string
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || !d.IsDir() {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)

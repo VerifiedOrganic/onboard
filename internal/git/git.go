@@ -117,10 +117,30 @@ type FileDiff struct {
 	Hunks  []Hunk `json:"-"`
 }
 
+// ValidateRef checks that ref is safe to pass to git and resolves to a commit.
+func ValidateRef(root, ref string) error {
+	if ref == "" {
+		return fmt.Errorf("empty git ref")
+	}
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("git ref %q looks like a flag", ref)
+	}
+	if strings.Contains(ref, "\x00") {
+		return fmt.Errorf("git ref contains null byte")
+	}
+	if !RefExists(root, ref) {
+		return fmt.Errorf("git ref %q does not resolve to a commit", ref)
+	}
+	return nil
+}
+
 // Diff returns the per-file changes between base and the working tree — committed *and*
 // uncommitted work since base, for tracked files (untracked files are not shown by git
 // diff). unified=0 keeps the hunks tight so they attribute to symbols precisely.
 func Diff(root, base string) ([]FileDiff, error) {
+	if err := ValidateRef(root, base); err != nil {
+		return nil, err
+	}
 	out, err := run(root, "diff", "--unified=0", "--no-color", "--find-renames", base, "--")
 	if err != nil {
 		return nil, err
@@ -131,6 +151,9 @@ func Diff(root, base string) ([]FileDiff, error) {
 // ArchiveTree materializes ref into dst using `git archive`. It is intended for read-only
 // analysis of base-side state, such as computing the blast radius of deleted symbols.
 func ArchiveTree(ctx context.Context, root, ref, dst string) error {
+	if err := ValidateRef(root, ref); err != nil {
+		return err
+	}
 	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
 	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", ref)
 	stdout, err := cmd.StdoutPipe()
@@ -158,6 +181,11 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 			return fmt.Errorf("git archive contained unsafe path %q", hdr.Name)
 		}
 		target := filepath.Join(dst, name)
+		rel, err := filepath.Rel(dst, target)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			_ = cmd.Wait()
+			return fmt.Errorf("git archive path %q escapes destination", hdr.Name)
+		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o700); err != nil {

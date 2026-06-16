@@ -54,6 +54,9 @@ func EnrichRust(ctx context.Context, root string, g *Graph) (int, error) {
 	byPos := make(map[string]string, len(g.Defs))
 	byFileLine := make(map[string][]string, len(g.Defs))
 	for q, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		if !strings.EqualFold(s.Lang, "rust") {
 			continue
 		}
@@ -213,6 +216,9 @@ func rustCallableQNames(g *Graph) ([]string, int, bool) {
 	if g != nil {
 		pr := g.PageRank(nil)
 		for q, s := range g.Defs {
+			if s == nil {
+				continue
+			}
 			if strings.EqualFold(s.Lang, "rust") && (s.Kind == "function" || s.Kind == "method") {
 				candidates = append(candidates, candidate{
 					qname:   q,

@@ -80,6 +80,10 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 		}
 	}
 	out.Base = base
+	if err := git.ValidateRef(root, base); err != nil {
+		out.Note = err.Error()
+		return out, nil
+	}
 
 	diffs, err := git.Diff(root, base)
 	if err != nil {
@@ -117,6 +121,9 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 	// approximated as [line, nextSymbolLine) for attributing changed lines.
 	defsByFile := map[string][]*providers.Symbol{}
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		f := filepath.ToSlash(s.File)
 		defsByFile[f] = append(defsByFile[f], s)
 	}
@@ -215,6 +222,9 @@ func deletedFileSymbols(g *providers.Graph, path string) []*providers.Symbol {
 	slashed := filepath.ToSlash(path)
 	var out []*providers.Symbol
 	for _, sym := range g.Defs {
+		if sym == nil {
+			continue
+		}
 		if filepath.ToSlash(sym.File) == slashed {
 			out = append(out, sym)
 		}

@@ -10,6 +10,7 @@ import (
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/VerifiedOrganic/onboard/internal/pathutil"
 	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
 
@@ -151,21 +152,25 @@ func renderMap(ctx context.Context, in renderMapInput) (renderMapOutput, error) 
 }
 
 func resolveOutputPath(root, outputPath string) (string, error) {
-	if !filepath.IsAbs(outputPath) {
-		outputPath = filepath.Join(root, outputPath)
+	if filepath.IsAbs(outputPath) {
+		rootAbs, err := filepath.Abs(root)
+		if err != nil {
+			return "", err
+		}
+		abs, err := filepath.Abs(outputPath)
+		if err != nil {
+			return "", err
+		}
+		rel, err := filepath.Rel(rootAbs, abs)
+		if err != nil {
+			return "", err
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("output_path %q must stay within repo root %q", outputPath, root)
+		}
+		return abs, nil
 	}
-	abs, err := filepath.Abs(outputPath)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(root, abs)
-	if err != nil {
-		return "", err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("output_path %q must stay within repo root %q", outputPath, root)
-	}
-	return abs, nil
+	return pathutil.JoinUnderRoot(root, outputPath)
 }
 
 // deriveMap aggregates the file-level call graph to a directory-level dependency
@@ -188,6 +193,9 @@ func deriveMap(g *providers.Graph, maxNodes int) (nodes []mapNode, edges []mapEd
 
 	filesByDir := map[string]map[string]bool{}
 	for _, s := range g.Defs {
+		if s == nil {
+			continue
+		}
 		d := filepath.ToSlash(filepath.Dir(s.File))
 		if d == "." || d == "" {
 			d = "(root)"

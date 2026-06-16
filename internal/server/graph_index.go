@@ -188,6 +188,9 @@ func getLanguageCapabilityNotes(g *providers.Graph) []string {
 		}
 	}
 	for _, sym := range g.Defs {
+		if sym == nil {
+			continue
+		}
 		if strings.Contains(strings.ToLower(sym.File), ".component.ts") || strings.Contains(strings.ToLower(sym.File), ".service.ts") {
 			hasAngular = true
 			break
