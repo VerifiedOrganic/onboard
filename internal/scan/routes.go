@@ -38,6 +38,16 @@ type Route struct {
 	Confidence string `json:"confidence"`
 }
 
+type routeCandidate struct {
+	Method     string
+	Path       string
+	File       string
+	Line       int
+	Source     string
+	Pattern    string
+	Confidence string
+}
+
 // RoutesResult is the output of route extraction.
 type RoutesResult struct {
 	Routes    []Route `json:"routes"`
@@ -53,14 +63,17 @@ func ExtractRoutes(root string) RoutesResult {
 	seen := map[string]bool{}
 	files := 0
 	sawIaC := false
-	add := func(method, path, file string, line int, source, pattern, confidence string) {
-		method = strings.ToUpper(method)
-		key := method + " " + path + " " + file
+	addCandidate := func(c routeCandidate) {
+		c.Method = strings.ToUpper(c.Method)
+		key := c.Method + " " + c.Path + " " + c.File
 		if seen[key] {
 			return
 		}
 		seen[key] = true
-		out.Routes = append(out.Routes, Route{
+		out.Routes = append(out.Routes, Route(c))
+	}
+	add := func(method, path, file string, line int, source, pattern, confidence string) {
+		addCandidate(routeCandidate{
 			Method:     method,
 			Path:       path,
 			File:       file,

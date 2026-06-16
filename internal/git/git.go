@@ -180,13 +180,17 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 			return err
 		}
 		name := filepath.Clean(filepath.FromSlash(hdr.Name))
-		if name == "." || name == ".." || filepath.IsAbs(name) || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
+		isCurrentOrParent := name == "." || name == ".."
+		isAbsolute := filepath.IsAbs(name)
+		escapesArchiveRoot := strings.HasPrefix(name, ".."+string(filepath.Separator))
+		if isCurrentOrParent || isAbsolute || escapesArchiveRoot {
 			_ = cmd.Wait()
 			return fmt.Errorf("git archive contained unsafe path %q", hdr.Name)
 		}
 		target := filepath.Join(dst, name)
 		rel, err := filepath.Rel(dst, target)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		relEscapesDestination := rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		if err != nil || relEscapesDestination {
 			_ = cmd.Wait()
 			return fmt.Errorf("git archive path %q escapes destination", hdr.Name)
 		}
