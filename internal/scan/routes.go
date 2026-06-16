@@ -1,11 +1,12 @@
 package scan
 
 import (
+	"cmp"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -177,14 +178,14 @@ func ExtractRoutes(root string) RoutesResult {
 	if len(out.Routes) >= maxRoutes {
 		out.Truncated = true
 	}
-	sort.Slice(out.Routes, func(i, j int) bool {
-		if out.Routes[i].Path != out.Routes[j].Path {
-			return out.Routes[i].Path < out.Routes[j].Path
+	slices.SortFunc(out.Routes, func(a, b Route) int {
+		if c := cmp.Compare(a.Path, b.Path); c != 0 {
+			return c
 		}
-		if out.Routes[i].Method != out.Routes[j].Method {
-			return out.Routes[i].Method < out.Routes[j].Method
+		if c := cmp.Compare(a.Method, b.Method); c != 0 {
+			return c
 		}
-		return out.Routes[i].File < out.Routes[j].File
+		return cmp.Compare(a.File, b.File)
 	})
 	out.Total = len(out.Routes)
 

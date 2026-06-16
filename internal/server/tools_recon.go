@@ -1,12 +1,13 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -225,12 +226,12 @@ func recon(ctx context.Context, _ *mcp.CallToolRequest, in reconInput) (*mcp.Cal
 	out.Stack = keys(stackSet)
 	out.Frameworks = keys(fwSet)
 	out.DirTree = dirTree(root, 2)
-	sort.Strings(out.Manifests)
-	sort.Strings(out.EntryPoints)
-	sort.Strings(out.TestLayout)
-	sort.Strings(out.Tooling)
-	sort.Strings(out.RustTargets)
-	sort.Strings(out.RiskHints)
+	slices.Sort(out.Manifests)
+	slices.Sort(out.EntryPoints)
+	slices.Sort(out.TestLayout)
+	slices.Sort(out.Tooling)
+	slices.Sort(out.RustTargets)
+	slices.Sort(out.RiskHints)
 	out.EntryPoints = dedupeStrings(out.EntryPoints)
 
 	// Git churn hotspots: the files that change most are where understanding and risk
@@ -268,11 +269,11 @@ func topExtensions(extCount map[string]int, n int) string {
 	for e, c := range extCount {
 		ranked = append(ranked, ec{e, c})
 	}
-	sort.Slice(ranked, func(i, j int) bool {
-		if ranked[i].count != ranked[j].count {
-			return ranked[i].count > ranked[j].count
+	slices.SortFunc(ranked, func(a, b ec) int {
+		if c := cmp.Compare(b.count, a.count); c != 0 {
+			return c
 		}
-		return ranked[i].ext < ranked[j].ext
+		return cmp.Compare(a.ext, b.ext)
 	})
 	if len(ranked) > n {
 		ranked = ranked[:n]
@@ -291,7 +292,7 @@ func dedupeStrings(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
-	sort.Strings(in)
+	slices.Sort(in)
 	out := in[:0]
 	var prev string
 	for i, v := range in {
@@ -328,7 +329,7 @@ func cargoTargetSummaries(metadata map[string]scan.ManifestDeps) []string {
 			out = append(out, md.Module+":"+target.Name+" ("+kind+") "+target.SrcPath)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -354,7 +355,7 @@ func dirTree(root string, maxDepth int) []string {
 		out = append(out, rel+"/")
 		return nil
 	})
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -372,6 +373,6 @@ func keys(m map[string]bool) []string {
 	for k := range m {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }

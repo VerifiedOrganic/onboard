@@ -1,11 +1,12 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -81,7 +82,9 @@ func schemaExtract(_ context.Context, in schemaInput) (schemaOutput, error) {
 	}
 
 	out.Relationships = scan.FilterRelationships(out.Relationships, seen)
-	sort.Slice(out.Entities, func(i, j int) bool { return out.Entities[i].Name < out.Entities[j].Name })
+	slices.SortFunc(out.Entities, func(a, b scan.Entity) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
 	out.Mermaid = scan.RenderERD(out.Entities, out.Relationships)
 	out.Note = "Entities and relationships parsed from SQL DDL (facts). A focused DDL reader, not a full SQL parser: exotic dialects or programmatically-built schemas may be missed."
 	return out, nil

@@ -1,10 +1,11 @@
 package scan
 
 import (
+	"cmp"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -247,7 +248,7 @@ func detectWorkspacesAndTools(root, rel string, raw rawPackageJSON, workspaces [
 		tools = append(tools, "Storybook")
 	}
 
-	sort.Strings(tools)
+	slices.Sort(tools)
 	var out []string
 	for i, t := range tools {
 		if i == 0 || t != tools[i-1] {
@@ -424,11 +425,18 @@ func stripTomlComment(line string) string {
 }
 
 func sortDeps(d []Dependency) {
-	sort.Slice(d, func(i, j int) bool {
-		if d[i].Name != d[j].Name {
-			return d[i].Name < d[j].Name
+	slices.SortFunc(d, func(a, b Dependency) int {
+		if c := cmp.Compare(a.Name, b.Name); c != 0 {
+			return c
 		}
-		return !d[i].Dev && d[j].Dev
+		switch {
+		case !a.Dev && b.Dev:
+			return -1
+		case a.Dev && !b.Dev:
+			return 1
+		default:
+			return 0
+		}
 	})
 }
 

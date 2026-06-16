@@ -1,11 +1,12 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -128,7 +129,9 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 		defsByFile[f] = append(defsByFile[f], s)
 	}
 	for _, defs := range defsByFile {
-		sort.Slice(defs, func(i, j int) bool { return defs[i].Line < defs[j].Line })
+		slices.SortFunc(defs, func(a, b *providers.Symbol) int {
+			return cmp.Compare(a.Line, b.Line)
+		})
 	}
 
 	impactedUnion := map[string]bool{}
@@ -158,15 +161,14 @@ func explainDiff(ctx context.Context, in explainDiffInput) (explainDiffOutput, e
 	}
 
 	// Widest blast radius first — that's what a reviewer should look at hardest.
-	sort.Slice(out.ChangedSymbols, func(i, j int) bool {
-		a, b := out.ChangedSymbols[i], out.ChangedSymbols[j]
-		if a.ImpactedCount != b.ImpactedCount {
-			return a.ImpactedCount > b.ImpactedCount
+	slices.SortFunc(out.ChangedSymbols, func(a, b changedSymbol) int {
+		if c := cmp.Compare(b.ImpactedCount, a.ImpactedCount); c != 0 {
+			return c
 		}
-		if a.File != b.File {
-			return a.File < b.File
+		if c := cmp.Compare(a.File, b.File); c != 0 {
+			return c
 		}
-		return a.Line < b.Line
+		return cmp.Compare(a.Line, b.Line)
 	})
 
 	limit := in.Limit
@@ -216,7 +218,9 @@ func deletedFileSymbols(g *providers.Graph, path string) []*providers.Symbol {
 			out = append(out, sym)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Line < out[j].Line })
+	slices.SortFunc(out, func(a, b *providers.Symbol) int {
+		return cmp.Compare(a.Line, b.Line)
+	})
 	return out
 }
 
@@ -263,7 +267,7 @@ func sortedSet(m map[string]bool) []string {
 	for k := range m {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

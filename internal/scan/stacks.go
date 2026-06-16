@@ -1,12 +1,13 @@
 package scan
 
 import (
+	"cmp"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -127,7 +128,9 @@ func ExtractStacks(root string) StacksResult {
 		out.Stacks = append(out.Stacks, unit)
 	}
 
-	sort.Slice(out.Stacks, func(i, j int) bool { return out.Stacks[i].Path < out.Stacks[j].Path })
+	slices.SortFunc(out.Stacks, func(a, b StackUnit) int {
+		return cmp.Compare(a.Path, b.Path)
+	})
 	out.Total = len(out.Stacks)
 
 	switch {
@@ -202,9 +205,9 @@ func readTerragruntUnit(root, rel string) (StackUnit, bool) {
 	for name := range inputSet {
 		unit.Inputs = append(unit.Inputs, name)
 	}
-	sort.Strings(unit.Inputs)
-	sort.Strings(unit.Includes)
-	sort.Strings(unit.Dependencies)
+	slices.Sort(unit.Inputs)
+	slices.Sort(unit.Includes)
+	slices.Sort(unit.Dependencies)
 	return unit, true
 }
 

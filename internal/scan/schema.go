@@ -1,9 +1,10 @@
 package scan
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -198,11 +199,11 @@ func FilterRelationships(rels []Relationship, known map[string]bool) []Relations
 		seen[key] = true
 		out = append(out, r)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].From != out[j].From {
-			return out[i].From < out[j].From
+	slices.SortFunc(out, func(a, b Relationship) int {
+		if c := cmp.Compare(a.From, b.From); c != 0 {
+			return c
 		}
-		return out[i].To < out[j].To
+		return cmp.Compare(a.To, b.To)
 	})
 	return out
 }

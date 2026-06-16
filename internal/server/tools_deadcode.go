@@ -1,9 +1,10 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -110,14 +111,14 @@ func deadCode(ctx context.Context, in deadCodeInput) (deadCodeOutput, error) {
 
 	// Highest confidence first, then file/line for a stable, reviewable order.
 	rank := map[string]int{"high": 0, "medium": 1, "low": 2}
-	sort.Slice(orphans, func(i, j int) bool {
-		if rank[orphans[i].Confidence] != rank[orphans[j].Confidence] {
-			return rank[orphans[i].Confidence] < rank[orphans[j].Confidence]
+	slices.SortFunc(orphans, func(a, b orphan) int {
+		if c := cmp.Compare(rank[a.Confidence], rank[b.Confidence]); c != 0 {
+			return c
 		}
-		if orphans[i].File != orphans[j].File {
-			return orphans[i].File < orphans[j].File
+		if c := cmp.Compare(a.File, b.File); c != 0 {
+			return c
 		}
-		return orphans[i].Line < orphans[j].Line
+		return cmp.Compare(a.Line, b.Line)
 	})
 
 	limit := in.Limit

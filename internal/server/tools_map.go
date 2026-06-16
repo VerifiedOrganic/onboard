@@ -1,11 +1,12 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -232,11 +233,11 @@ func deriveMap(g *providers.Graph, maxNodes int) (nodes []mapNode, edges []mapEd
 	for d := range filesByDir {
 		all = append(all, ranked{d, deg[d]})
 	}
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].deg != all[j].deg {
-			return all[i].deg > all[j].deg
+	slices.SortFunc(all, func(a, b ranked) int {
+		if c := cmp.Compare(b.deg, a.deg); c != 0 {
+			return c
 		}
-		return all[i].dir < all[j].dir
+		return cmp.Compare(a.dir, b.dir)
 	})
 	total = len(all)
 	if len(all) > maxNodes {
@@ -251,7 +252,7 @@ func deriveMap(g *providers.Graph, maxNodes int) (nodes []mapNode, edges []mapEd
 		for f := range filesByDir[r.dir] {
 			files = append(files, f)
 		}
-		sort.Strings(files)
+		slices.Sort(files)
 		nodes = append(nodes, mapNode{
 			ID:          r.dir,
 			Label:       r.dir,

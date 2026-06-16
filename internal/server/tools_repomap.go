@@ -1,11 +1,12 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -126,14 +127,14 @@ func repoMap(ctx context.Context, in repoMapInput) (repoMapOutput, error) {
 			Score:   blendScore(pr[q], maxPR, commits, maxLogChurn, weight, blended),
 		})
 	}
-	sort.Slice(ranked, func(i, j int) bool {
-		if ranked[i].Score != ranked[j].Score {
-			return ranked[i].Score > ranked[j].Score
+	slices.SortFunc(ranked, func(a, b rankedSymbol) int {
+		if c := compareScoreDesc(a.Score, b.Score); c != 0 {
+			return c
 		}
-		if ranked[i].Callers != ranked[j].Callers {
-			return ranked[i].Callers > ranked[j].Callers
+		if c := cmp.Compare(b.Callers, a.Callers); c != 0 {
+			return c
 		}
-		return ranked[i].QName < ranked[j].QName
+		return cmp.Compare(a.QName, b.QName)
 	})
 
 	// Greedily include symbols in rank order until the token budget is exhausted,
@@ -187,7 +188,9 @@ func renderRepoMap(syms []rankedSymbol) string {
 	var b strings.Builder
 	for _, f := range order {
 		grp := groups[f]
-		sort.Slice(grp, func(i, j int) bool { return grp[i].Line < grp[j].Line })
+		slices.SortFunc(grp, func(a, b rankedSymbol) int {
+			return cmp.Compare(a.Line, b.Line)
+		})
 		b.WriteString(f)
 		b.WriteByte('\n')
 		for _, s := range grp {
@@ -214,6 +217,17 @@ func symbolLine(s rankedSymbol) string {
 		suffix = "  (" + strings.Join(tags, ", ") + ")"
 	}
 	return fmt.Sprintf("  :%-5d %-8s %s%s\n", s.Line, kind, s.Name, suffix)
+}
+
+func compareScoreDesc(a, b float64) int {
+	switch {
+	case a > b:
+		return -1
+	case b > a:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // blendScore fuses call-graph centrality with git churn into one ranking score in [0,1].

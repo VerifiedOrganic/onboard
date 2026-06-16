@@ -1,12 +1,13 @@
 package scan
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -96,11 +97,11 @@ func ParseCargoMetadata(root string, data []byte) map[string]ManifestDeps {
 				Edition:    target.Edition,
 			})
 		}
-		sort.Slice(md.Targets, func(i, j int) bool {
-			if md.Targets[i].SrcPath != md.Targets[j].SrcPath {
-				return md.Targets[i].SrcPath < md.Targets[j].SrcPath
+		slices.SortFunc(md.Targets, func(a, b RustTarget) int {
+			if c := cmp.Compare(a.SrcPath, b.SrcPath); c != 0 {
+				return c
 			}
-			return md.Targets[i].Name < md.Targets[j].Name
+			return cmp.Compare(a.Name, b.Name)
 		})
 		out[rel] = md
 	}

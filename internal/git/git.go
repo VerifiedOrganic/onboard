@@ -5,6 +5,7 @@ package git
 
 import (
 	"archive/tar"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -429,11 +430,11 @@ func History(ctx context.Context, root string, maxCommits int) ([]FileStat, erro
 			Deletions: a.dels, LastDate: last, Authors: len(a.authors),
 		})
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Commits != result[j].Commits {
-			return result[i].Commits > result[j].Commits
+	slices.SortFunc(result, func(a, b FileStat) int {
+		if c := cmp.Compare(b.Commits, a.Commits); c != 0 {
+			return c
 		}
-		return result[i].Path < result[j].Path
+		return cmp.Compare(a.Path, b.Path)
 	})
 	return result, nil
 }

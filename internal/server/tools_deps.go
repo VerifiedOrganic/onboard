@@ -1,11 +1,12 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -89,7 +90,7 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 				workspaceDeps = append(workspaceDeps, targetManifest)
 			}
 		}
-		sort.Strings(workspaceDeps)
+		slices.Sort(workspaceDeps)
 		var uniqueWorkspaceDeps []string
 		for k, w := range workspaceDeps {
 			if k == 0 || w != workspaceDeps[k-1] {
@@ -99,7 +100,9 @@ func depsExtract(ctx context.Context, in depsInput) (depsOutput, error) {
 		m.WorkspaceDependencies = uniqueWorkspaceDeps
 	}
 
-	sort.Slice(out.Manifests, func(i, j int) bool { return out.Manifests[i].Manifest < out.Manifests[j].Manifest })
+	slices.SortFunc(out.Manifests, func(a, b scan.ManifestDeps) int {
+		return cmp.Compare(a.Manifest, b.Manifest)
+	})
 	for _, m := range out.Manifests {
 		out.TotalDirect += len(m.Direct)
 	}

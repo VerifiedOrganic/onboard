@@ -1,11 +1,13 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -142,14 +144,14 @@ func contextPack(ctx context.Context, in contextPackInput) (contextPackOutput, e
 			Score:    packScore(d, pr[q], maxPR, commits, maxLogChurn),
 		})
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Score != items[j].Score {
-			return items[i].Score > items[j].Score
+	slices.SortFunc(items, func(a, b contextItem) int {
+		if c := compareScoreDesc(a.Score, b.Score); c != 0 {
+			return c
 		}
-		if items[i].Distance != items[j].Distance {
-			return items[i].Distance < items[j].Distance
+		if c := cmp.Compare(a.Distance, b.Distance); c != 0 {
+			return c
 		}
-		return items[i].QName < items[j].QName
+		return cmp.Compare(a.QName, b.QName)
 	})
 	out.TotalCandidates = len(items)
 
@@ -221,7 +223,9 @@ func resolveSeeds(g *providers.Graph, seed string) []*providers.Symbol {
 }
 
 func sortSyms(s []*providers.Symbol) {
-	sort.Slice(s, func(i, j int) bool { return s[i].QName < s[j].QName })
+	slices.SortFunc(s, func(a, b *providers.Symbol) int {
+		return cmp.Compare(a.QName, b.QName)
+	})
 }
 
 // neighborhood does a breadth-first walk outward from the seeds over BOTH directions

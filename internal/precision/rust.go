@@ -3,6 +3,7 @@ package precision
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,7 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -231,17 +232,17 @@ func rustCallableQNames(g *providers.Graph) ([]string, int, bool) {
 			}
 		}
 	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].rank != candidates[j].rank {
-			return candidates[i].rank > candidates[j].rank
+	slices.SortFunc(candidates, func(a, b candidate) int {
+		if c := compareFloatDesc(a.rank, b.rank); c != 0 {
+			return c
 		}
-		if candidates[i].impact != candidates[j].impact {
-			return candidates[i].impact > candidates[j].impact
+		if c := cmp.Compare(b.impact, a.impact); c != 0 {
+			return c
 		}
-		if candidates[i].callers != candidates[j].callers {
-			return candidates[i].callers > candidates[j].callers
+		if c := cmp.Compare(b.callers, a.callers); c != 0 {
+			return c
 		}
-		return candidates[i].qname < candidates[j].qname
+		return cmp.Compare(a.qname, b.qname)
 	})
 	total := len(candidates)
 	if len(candidates) > maxRustPreciseSyms {
@@ -253,6 +254,17 @@ func rustCallableQNames(g *providers.Graph) ([]string, int, bool) {
 	}
 	truncated := total > len(qnames)
 	return qnames, total, truncated
+}
+
+func compareFloatDesc(a, b float64) int {
+	switch {
+	case a > b:
+		return -1
+	case b > a:
+		return 1
+	default:
+		return 0
+	}
 }
 
 type rustAnalyzerClient struct {

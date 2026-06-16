@@ -4,9 +4,10 @@
 package providers
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -183,7 +184,9 @@ func (g *Graph) FindSymbols(query string) []*Symbol {
 		}
 	}
 	out := append(exact, sub...)
-	sort.Slice(out, func(i, j int) bool { return out[i].QName < out[j].QName })
+	slices.SortFunc(out, func(a, b *Symbol) int {
+		return cmp.Compare(a.QName, b.QName)
+	})
 	return out
 }
 
@@ -225,7 +228,7 @@ func sortedKeys(m map[string]bool) []string {
 	for k := range m {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
