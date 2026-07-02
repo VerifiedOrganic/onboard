@@ -152,7 +152,11 @@ func Diff(ctx context.Context, root, base string) ([]FileDiff, error) {
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)
 	}
-	return parseUnifiedDiff(out), nil
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 // ArchiveTree materializes ref into dst using `git archive`. It is intended for read-only
@@ -255,7 +259,7 @@ func tarFilePerm(mode int64) os.FileMode {
 
 // parseUnifiedDiff parses `git diff --unified=0` output into per-file changes. It is a
 // pure function (no git invocation) so the parsing is unit-testable on canned input.
-func parseUnifiedDiff(out string) []FileDiff {
+func parseUnifiedDiff(out string) ([]FileDiff, error) {
 	var files []FileDiff
 	var cur *FileDiff
 	flush := func() {
@@ -283,13 +287,17 @@ func parseUnifiedDiff(out string) []FileDiff {
 				cur.Path = p
 			}
 		case strings.HasPrefix(line, "@@"):
-			if h, ok := parseHunkHeader(line); ok {
+			h, ok, err := parseHunkHeader(line)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
 				cur.Hunks = append(cur.Hunks, h)
 			}
 		}
 	}
 	flush()
-	return files
+	return files, nil
 }
 
 // diffGitBPath extracts the new-side path from a "diff --git a/old b/new" header.
@@ -311,29 +319,51 @@ func plusPath(line string) string {
 }
 
 // parseHunkHeader reads the new-side range from a "@@ -a,b +c,d @@" hunk header.
-func parseHunkHeader(line string) (Hunk, bool) {
-	plus := strings.IndexByte(line, '+')
-	if plus < 0 {
-		return Hunk{}, false
+func parseHunkHeader(line string) (Hunk, bool, error) {
+	fields := strings.Fields(line)
+	if len(fields) < 3 || fields[0] != "@@" {
+		return Hunk{}, false, fmt.Errorf("parse diff hunk header %q: malformed header", line)
 	}
-	tok := line[plus+1:]
-	if sp := strings.IndexByte(tok, ' '); sp >= 0 {
-		tok = tok[:sp]
+	if _, _, err := parseDiffRange(fields[1], '-'); err != nil {
+		return Hunk{}, false, fmt.Errorf("parse diff hunk header %q: %w", line, err)
 	}
-	start, count := 0, 1
-	if comma := strings.IndexByte(tok, ','); comma >= 0 {
-		start, _ = strconv.Atoi(tok[:comma])
-		count, _ = strconv.Atoi(tok[comma+1:])
-	} else {
-		start, _ = strconv.Atoi(tok)
+	start, count, err := parseDiffRange(fields[2], '+')
+	if err != nil {
+		return Hunk{}, false, fmt.Errorf("parse diff hunk header %q: %w", line, err)
 	}
 	if start == 0 { // a 0,0 new-side means the change is a pure deletion — no new lines
-		return Hunk{}, false
+		return Hunk{}, false, nil
 	}
 	if count <= 0 {
 		count = 1
 	}
-	return Hunk{Start: start, End: start + count - 1}, true
+	return Hunk{Start: start, End: start + count - 1}, true, nil
+}
+
+func parseDiffRange(tok string, prefix byte) (int, int, error) {
+	if len(tok) < 2 || tok[0] != prefix {
+		return 0, 0, fmt.Errorf("range %q missing %c prefix", tok, prefix)
+	}
+	tok = tok[1:]
+	count := 1
+	var err error
+	var start int
+	if comma := strings.IndexByte(tok, ','); comma >= 0 {
+		start, err = strconv.Atoi(tok[:comma])
+		if err != nil {
+			return 0, 0, err
+		}
+		count, err = strconv.Atoi(tok[comma+1:])
+		if err != nil {
+			return 0, 0, err
+		}
+		return start, count, nil
+	}
+	start, err = strconv.Atoi(tok)
+	if err != nil {
+		return 0, 0, err
+	}
+	return start, count, nil
 }
 
 // RefExists reports whether ref resolves to a commit.

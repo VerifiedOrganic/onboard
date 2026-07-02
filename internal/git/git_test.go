@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/VerifiedOrganic/onboard/internal/apperrors"
@@ -203,7 +204,10 @@ rename to new/name.go
 @@ -5 +5 @@ func Z() {
 +	tweak
 `
-	files := parseUnifiedDiff(out)
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(files) != 4 {
 		t.Fatalf("parsed %d files, want 4: %+v", len(files), files)
 	}
@@ -227,8 +231,28 @@ rename to new/name.go
 	}
 }
 
+func TestParseDiffRejectsMalformedHunkHeader(t *testing.T) {
+	out := `diff --git a/internal/x/y.go b/internal/x/y.go
+index 111..222 100644
+--- a/internal/x/y.go
++++ b/internal/x/y.go
+@@ -abc,2 +3,4 @@
++added
+`
+	_, err := parseUnifiedDiff(out)
+	if err == nil {
+		t.Fatal("parseUnifiedDiff error = nil, want malformed hunk error")
+	}
+	if !strings.Contains(err.Error(), "hunk") {
+		t.Fatalf("parseUnifiedDiff error = %q, want hunk context", err.Error())
+	}
+}
+
 func TestParseHunkHeaderSingleLine(t *testing.T) {
-	h, ok := parseHunkHeader("@@ -40 +41 @@ func Bar() {")
+	h, ok, err := parseHunkHeader("@@ -40 +41 @@ func Bar() {")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok || h != (Hunk{Start: 41, End: 41}) {
 		t.Errorf("single-line hunk = %v ok=%v, want {41 41}", h, ok)
 	}
