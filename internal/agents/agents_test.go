@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -411,6 +412,44 @@ func TestInstallSkillsDoesNotCleanCustomLegacyNamedDirs(t *testing.T) {
 	}
 	if !exists(customDir) {
 		t.Error("custom legacy-named dir was removed")
+	}
+}
+
+func TestInspectFlagsLegacySkillDirs(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	canonicalDir := filepath.Join(skillsDir, "onboard-codebase-walkthrough")
+	legacyDir := filepath.Join(skillsDir, "codebase-walkthrough")
+	for _, path := range []string{canonicalDir, legacyDir} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(canonicalDir, "SKILL.md"), []byte("---\nname: onboard-codebase-walkthrough\n---\n# Codebase Walkthrough\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "SKILL.md"), []byte("---\nname: codebase-walkthrough\n---\n# Codebase Walkthrough\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := Agent{Name: "claude", SkillsDir: skillsDir, ConfigPath: filepath.Join(dir, "config.json"), Shape: ShapeJSONMCPServers}
+	h := Inspect(agent)
+	if !slices.Contains(h.LegacySkillDirs, "codebase-walkthrough") {
+		t.Fatalf("LegacySkillDirs = %v, want codebase-walkthrough", h.LegacySkillDirs)
+	}
+
+	cleanDir := filepath.Join(dir, "clean-skills")
+	cleanCanonical := filepath.Join(cleanDir, "onboard-codebase-walkthrough")
+	if err := os.MkdirAll(cleanCanonical, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cleanCanonical, "SKILL.md"), []byte("---\nname: onboard-codebase-walkthrough\n---\n# Codebase Walkthrough\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cleanAgent := Agent{Name: "claude", SkillsDir: cleanDir, ConfigPath: filepath.Join(dir, "clean.json"), Shape: ShapeJSONMCPServers}
+	clean := Inspect(cleanAgent)
+	if len(clean.LegacySkillDirs) != 0 {
+		t.Fatalf("clean LegacySkillDirs = %v, want none", clean.LegacySkillDirs)
 	}
 }
 

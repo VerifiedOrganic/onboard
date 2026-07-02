@@ -49,6 +49,9 @@ problem, so it is safe to use as a post-install or CI check.`,
 			if h.ConfiguredBin != "" {
 				fmt.Printf("      bin: %s\n", h.ConfiguredBin)
 			}
+			for _, legacy := range h.LegacySkillDirs {
+				fmt.Printf("      ! legacy skill dir %s shadows onboard-%s; remove it or rerun 'onboard uninstall --agent %s' + 'onboard init'\n", legacy, legacy, a.Name)
+			}
 			for _, iss := range h.Issues {
 				fmt.Printf("      ! %s\n", iss)
 			}
