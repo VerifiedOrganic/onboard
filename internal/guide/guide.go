@@ -51,7 +51,7 @@ func Read(ctx context.Context, root string) (Guide, error) {
 		if os.IsNotExist(err) {
 			return g, nil
 		}
-		return g, err
+		return g, fmt.Errorf("read guide: %w", err)
 	}
 	g.Exists = true
 	g.Header, g.Body = parse(string(data))
@@ -66,7 +66,7 @@ func Write(ctx context.Context, root, body, mode string, now time.Time) (string,
 	}
 	p := Path(ctx, root)
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return "", err
+		return "", fmt.Errorf("create guide dir: %w", err)
 	}
 	h := Header{Mode: mode, Generated: now.UTC().Format(time.RFC3339)}
 	h.SHA, _ = git.HeadSHA(ctx, root) // empty if not a git repo; that's fine
@@ -74,7 +74,7 @@ func Write(ctx context.Context, root, body, mode string, now time.Time) (string,
 	content := format(h) + "\n\n" + strings.TrimLeft(body, "\n")
 	tmp, err := os.CreateTemp(filepath.Dir(p), fileName+".*.tmp")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create guide temp: %w", err)
 	}
 	tmpPath := tmp.Name()
 	cleanup := true
@@ -85,17 +85,17 @@ func Write(ctx context.Context, root, body, mode string, now time.Time) (string,
 	}()
 	if _, err := tmp.WriteString(content); err != nil {
 		_ = tmp.Close()
-		return "", err
+		return "", fmt.Errorf("write guide temp: %w", err)
 	}
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
-		return "", err
+		return "", fmt.Errorf("set guide permissions: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return "", err
+		return "", fmt.Errorf("close guide temp: %w", err)
 	}
 	if err := os.Rename(tmpPath, p); err != nil {
-		return "", err
+		return "", fmt.Errorf("commit guide: %w", err)
 	}
 	cleanup = false
 	return p, nil

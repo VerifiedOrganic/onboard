@@ -41,7 +41,7 @@ func Available(ctx context.Context, root string) bool {
 func CommonDir(ctx context.Context, root string) (string, error) {
 	out, err := run(ctx, root, "rev-parse", "--git-common-dir")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("git common dir: %w", err)
 	}
 	dir := strings.TrimSpace(out)
 	if !filepath.IsAbs(dir) {
@@ -76,7 +76,7 @@ func DiffNameStatus(ctx context.Context, root, fromSHA string) ([]Change, error)
 	}
 	out, err := run(ctx, root, "diff", "--name-status", "-z", fromSHA+"..HEAD")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("diff name-status: %w", err)
 	}
 	return parseNameStatusZ(out), nil
 }
@@ -146,11 +146,11 @@ func ValidateRef(ctx context.Context, root, ref string) error {
 // diff). unified=0 keeps the hunks tight so they attribute to symbols precisely.
 func Diff(ctx context.Context, root, base string) ([]FileDiff, error) {
 	if err := ValidateRef(ctx, root, base); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git diff from %q: %w", base, err)
 	}
 	out, err := run(ctx, root, "diff", "--unified=0", "--no-color", "--find-renames", base, "--")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git diff: %w", err)
 	}
 	return parseUnifiedDiff(out), nil
 }
@@ -159,15 +159,15 @@ func Diff(ctx context.Context, root, base string) ([]FileDiff, error) {
 // analysis of base-side state, such as computing the blast radius of deleted symbols.
 func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 	if err := ValidateRef(ctx, root, ref); err != nil {
-		return err
+		return fmt.Errorf("archive git tree from %q: %w", ref, err)
 	}
 	cmd := newGitCmd(ctx, root, "archive", "--format=tar", ref)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return fmt.Errorf("extract git archive: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return err
+		return fmt.Errorf("extract git archive: %w", err)
 	}
 
 	tr := tar.NewReader(stdout)
@@ -179,7 +179,7 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 		}
 		if err != nil {
 			_ = cmd.Wait()
-			return err
+			return fmt.Errorf("extract git archive: %w", err)
 		}
 		name := filepath.Clean(filepath.FromSlash(hdr.Name))
 		isCurrentOrParent := name == "." || name == ".."
@@ -187,20 +187,24 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 		escapesArchiveRoot := strings.HasPrefix(name, ".."+string(filepath.Separator))
 		if isCurrentOrParent || isAbsolute || escapesArchiveRoot {
 			_ = cmd.Wait()
-			return fmt.Errorf("git archive contained unsafe path %q", hdr.Name)
+			return fmt.Errorf("%w: git archive contained unsafe path %q", apperrors.ErrPathEscapesRoot, hdr.Name)
 		}
 		target := filepath.Join(dst, name)
 		rel, err := filepath.Rel(dst, target)
 		relEscapesDestination := rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
-		if err != nil || relEscapesDestination {
+		if err != nil {
 			_ = cmd.Wait()
-			return fmt.Errorf("git archive path %q escapes destination", hdr.Name)
+			return fmt.Errorf("extract git archive: %w", err)
+		}
+		if relEscapesDestination {
+			_ = cmd.Wait()
+			return fmt.Errorf("%w: git archive path %q escapes destination", apperrors.ErrPathEscapesRoot, hdr.Name)
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o700); err != nil {
 				_ = cmd.Wait()
-				return err
+				return fmt.Errorf("extract git archive: %w", err)
 			}
 		case tar.TypeReg:
 			if hdr.Size < 0 || hdr.Size > maxArchiveFileBytes {
@@ -214,27 +218,30 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				_ = cmd.Wait()
-				return err
+				return fmt.Errorf("extract git archive: %w", err)
 			}
 			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, tarFilePerm(hdr.Mode))
 			if err != nil {
 				_ = cmd.Wait()
-				return err
+				return fmt.Errorf("extract git archive: %w", err)
 			}
 			// #nosec G110 -- git archive extraction is bounded by per-file and total byte limits above.
 			_, copyErr := io.CopyN(f, tr, hdr.Size)
 			closeErr := f.Close()
 			if copyErr != nil {
 				_ = cmd.Wait()
-				return copyErr
+				return fmt.Errorf("extract git archive: %w", copyErr)
 			}
 			if closeErr != nil {
 				_ = cmd.Wait()
-				return closeErr
+				return fmt.Errorf("extract git archive: %w", closeErr)
 			}
 		}
 	}
-	return cmd.Wait()
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("extract git archive: %w", err)
+	}
+	return nil
 }
 
 func tarFilePerm(mode int64) os.FileMode {
@@ -378,7 +385,7 @@ func History(ctx context.Context, root string, maxCommits int) ([]FileStat, erro
 	}
 	out, err := run(ctx, root, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git history: %w", err)
 	}
 
 	type agg struct {

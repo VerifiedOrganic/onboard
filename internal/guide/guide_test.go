@@ -2,6 +2,7 @@ package guide
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,6 +83,25 @@ func TestReadMissing(t *testing.T) {
 	}
 	if g.Exists {
 		t.Error("expected Exists=false for a repo with no guide yet")
+	}
+}
+
+func TestReadWrapsOSError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".onboard"), []byte("not a directory\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Read(context.Background(), root)
+	if err == nil {
+		t.Fatal("Read error = nil, want wrapped os error")
+	}
+	if !strings.Contains(err.Error(), "read guide") {
+		t.Fatalf("Read error = %q, want read guide context", err.Error())
+	}
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("Read error = %T %[1]v, want *os.PathError in chain", err)
 	}
 }
 
