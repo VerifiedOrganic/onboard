@@ -11,13 +11,14 @@ import (
 	"testing"
 
 	"github.com/VerifiedOrganic/onboard/internal/apperrors"
+	"github.com/VerifiedOrganic/onboard/internal/testenv"
 )
 
 // initRepo creates an isolated git repo with one commit and returns its path.
 func initRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
+		testenv.SkipUnlessTool(t, "git not on PATH")
 	}
 	dir := t.TempDir()
 	run := func(args ...string) {

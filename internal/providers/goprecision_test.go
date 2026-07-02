@@ -10,6 +10,7 @@ import (
 	"github.com/VerifiedOrganic/onboard/internal/indexer"
 	"github.com/VerifiedOrganic/onboard/internal/precision"
 	"github.com/VerifiedOrganic/onboard/internal/providers"
+	"github.com/VerifiedOrganic/onboard/internal/testenv"
 )
 
 func writeGoFile(t *testing.T, dir, rel, content string) {
@@ -61,7 +62,7 @@ func defsNamed(g *providers.Graph, name string) []*providers.Symbol {
 
 func TestEnrichGoResolvesInterfaceDispatch(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("go toolchain not installed")
+		testenv.SkipUnlessTool(t, "go toolchain not installed")
 	}
 	root := dispatchModule(t)
 	ctx := context.Background()

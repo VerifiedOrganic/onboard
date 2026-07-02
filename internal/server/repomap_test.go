@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/testenv"
 )
 
 // gitGraphFixture builds a small, hermetic git repo where call-graph centrality and git
@@ -18,7 +20,7 @@ import (
 func gitGraphFixture(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
+		testenv.SkipUnlessTool(t, "git not installed")
 	}
 	root := t.TempDir()
 	env := append(os.Environ(),

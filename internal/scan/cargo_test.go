@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/testenv"
 )
 
 func depByName(m ManifestDeps, name string) (Dependency, bool) {
@@ -71,7 +73,7 @@ func TestParseCargoMetadataAddsTargetsAndKinds(t *testing.T) {
 
 func TestLoadCargoMetadataWhenCargoAvailable(t *testing.T) {
 	if _, err := exec.LookPath("cargo"); err != nil {
-		t.Skip("cargo not installed")
+		testenv.SkipUnlessTool(t, "cargo not installed")
 	}
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "Cargo.toml"), []byte("[package]\nname = \"live\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"), 0o644); err != nil {

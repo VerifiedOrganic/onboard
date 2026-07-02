@@ -26,6 +26,22 @@ jobs:
           echo "total coverage (excl. precision toolchain): ${pct}%"
           awk -v p="$pct" 'BEGIN { if (p+0 < 65) { print "coverage below 65% floor"; exit 1 } }'
 
+  toolchain-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup component add rust-analyzer
+      - name: Run toolchain-gated tests (skips are failures)
+        env:
+          ONBOARD_TEST_REQUIRE_TOOLCHAIN: "1"
+        run: |
+          go test -v ./internal/providers/ ./internal/scan/ ./internal/git/ ./internal/guide/ ./internal/server/ ./internal/precision/ 2>&1 | tee /tmp/toolchain-tests.out
+          ! grep -E -- '--- SKIP' /tmp/toolchain-tests.out
+
   lint:
     runs-on: ubuntu-latest
     steps:

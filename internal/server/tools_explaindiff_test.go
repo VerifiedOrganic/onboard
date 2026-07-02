@@ -10,6 +10,7 @@ import (
 
 	"github.com/VerifiedOrganic/onboard/internal/git"
 	"github.com/VerifiedOrganic/onboard/internal/providers"
+	"github.com/VerifiedOrganic/onboard/internal/testenv"
 )
 
 func TestTouchedSymbolsAttributesByRange(t *testing.T) {
@@ -61,7 +62,7 @@ func TestExplainDiffNonGitDegrades(t *testing.T) {
 
 func TestExplainDiffIncludesDeletedFileSymbols(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
+		testenv.SkipUnlessTool(t, "git not available")
 	}
 	root := t.TempDir()
 	runGit(t, root, "init")
