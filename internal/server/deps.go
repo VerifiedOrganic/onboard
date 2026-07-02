@@ -81,7 +81,7 @@ func logTool(ctx context.Context, name string, start time.Time, err error) {
 	}
 	attrs := []any{"tool", name, "duration_ms", time.Since(start).Milliseconds()}
 	if err != nil {
-		attrs = append(attrs, "error", err.Error())
+		attrs = append(attrs, "err", err)
 	}
 	logger.InfoContext(ctx, "mcp tool", attrs...)
 }

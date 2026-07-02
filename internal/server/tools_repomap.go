@@ -296,9 +296,11 @@ func fileChurnWithMax(ctx context.Context, root string, maxCommits int, refresh 
 		}
 	}
 
-	churnCache.Lock()
-	churnCache.entries[key] = churnCacheEntry{expires: now.Add(churnCacheTTL), values: copyIntMap(churn)}
-	churnCache.Unlock()
+	func() {
+		churnCache.Lock()
+		defer churnCache.Unlock()
+		churnCache.entries[key] = churnCacheEntry{expires: now.Add(churnCacheTTL), values: copyIntMap(churn)}
+	}()
 	return churn
 }
 
