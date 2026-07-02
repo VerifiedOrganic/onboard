@@ -158,8 +158,7 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 	if err := ValidateRef(ctx, root, ref); err != nil {
 		return err
 	}
-	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", ref)
+	cmd := newGitCmd(ctx, root, "archive", "--format=tar", ref)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -470,8 +469,7 @@ func run(ctx context.Context, root string, args ...string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
 	defer cancel()
-	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd := newGitCmd(ctx, root, args...)
 	out, err := cmd.Output()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return string(out), fmt.Errorf("git %s timed out after %s: %w", strings.Join(args, " "), gitCommandTimeout, ctx.Err())
@@ -487,4 +485,13 @@ func run(ctx context.Context, root string, args ...string) (string, error) {
 		return string(out), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return string(out), nil
+}
+
+// newGitCmd builds a git invocation with a hardened environment: C locale so
+// error classification is stable, no credential prompts, no optional locks.
+func newGitCmd(ctx context.Context, root string, args ...string) *exec.Cmd {
+	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANGUAGE=C", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	return cmd
 }

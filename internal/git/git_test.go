@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -52,6 +53,31 @@ func commit(t *testing.T, dir, file, content, msg string) {
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestNewGitCmdHardenedEnv(t *testing.T) {
+	t.Parallel()
+
+	cmd := newGitCmd(context.Background(), "/tmp/r", "status")
+	wantArgs := []string{"git", "-C", "/tmp/r", "status"}
+	if !slices.Equal(cmd.Args, wantArgs) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, wantArgs)
+	}
+
+	env := map[string]bool{}
+	for _, kv := range cmd.Env {
+		env[kv] = true
+	}
+	for _, want := range []string{
+		"LC_ALL=C",
+		"LANGUAGE=C",
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_OPTIONAL_LOCKS=0",
+	} {
+		if !env[want] {
+			t.Fatalf("cmd.Env missing %q; env=%v", want, cmd.Env)
 		}
 	}
 }
