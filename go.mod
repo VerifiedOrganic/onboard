@@ -2,6 +2,8 @@ module github.com/VerifiedOrganic/onboard
 
 go 1.26.0
 
+toolchain go1.26.4
+
 require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/odvcencio/gotreesitter v0.19.1
