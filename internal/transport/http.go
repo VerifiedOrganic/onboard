@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -102,6 +103,10 @@ func observedHandler(next http.Handler, bearerToken string, maxBodyBytes int64, 
 				)
 			}
 		}()
+		if o := r.Header.Get("Origin"); o != "" && !allowedLocalOrigin(o) {
+			rec.WriteHeader(http.StatusForbidden)
+			return
+		}
 		if bearerToken != "" && !validBearer(r, bearerToken) {
 			if metrics != nil {
 				metrics.UnauthorizedTotal.Add(1)
@@ -142,6 +147,10 @@ func (r *statusRecorder) Flush() {
 
 func metricsHandler(metrics *Metrics, bearerToken string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if o := r.Header.Get("Origin"); o != "" && !allowedLocalOrigin(o) {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 		if bearerToken != "" && !validBearer(r, bearerToken) {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -152,6 +161,19 @@ func metricsHandler(metrics *Metrics, bearerToken string) http.Handler {
 		_, _ = fmt.Fprintf(w, "onboard_http_unauthorized_total %d\n", metrics.UnauthorizedTotal.Load())
 		_, _ = fmt.Fprintf(w, "onboard_http_request_duration_seconds_total %.6f\n", float64(metrics.DurationNanosTotal.Load())/float64(time.Second))
 	})
+}
+
+// allowedLocalOrigin accepts browser origins that can only be same-machine.
+func allowedLocalOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }
 
 func validBearer(r *http.Request, want string) bool {

@@ -54,3 +54,46 @@ func TestMetricsHandlerRequiresBearer(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
+
+func TestOriginValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		origin      string
+		wantStatus  int
+		wantInvoked bool
+	}{
+		{name: "no origin", wantStatus: http.StatusNoContent, wantInvoked: true},
+		{name: "localhost origin", origin: "http://localhost:5173", wantStatus: http.StatusNoContent, wantInvoked: true},
+		{name: "loopback origin", origin: "http://127.0.0.1:8080", wantStatus: http.StatusNoContent, wantInvoked: true},
+		{name: "external origin", origin: "https://evil.example", wantStatus: http.StatusForbidden, wantInvoked: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			invoked := false
+			handler := observedHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				invoked = true
+				w.WriteHeader(http.StatusNoContent)
+			}), "secret", 1024, nil, nil)
+
+			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			req.Header.Set("Authorization", "Bearer secret")
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if invoked != tt.wantInvoked {
+				t.Fatalf("inner handler invoked = %v, want %v", invoked, tt.wantInvoked)
+			}
+		})
+	}
+}
