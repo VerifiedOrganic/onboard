@@ -123,6 +123,7 @@ The docs are arranged by what you're trying to do, not by what's easiest to writ
 | **Use it** — install, verify, run your first walkthrough | [getting-started.md](docs/getting-started.md) · [install.md](docs/install.md) |
 | **Understand it** — the mental model before the internals | [concepts.md](docs/concepts.md) |
 | **Integrate it** — the tool, skill, and prompt contracts | [mcp-tools.md](docs/mcp-tools.md) · [skills.md](docs/skills.md) · [guide-cache.md](docs/guide-cache.md) |
+| **Run it in CI** — PR blast-radius on every push | [ci.md](docs/ci.md) |
 | **Build on it** — hack on onboard's own Go internals | [architecture.md](docs/architecture.md) · [code-graph.md](docs/code-graph.md) · [development.md](docs/development.md) |
 | **See why it's built this way** | [research-notes.md](docs/research-notes.md) · [enhancements.md](docs/enhancements.md) |
 
