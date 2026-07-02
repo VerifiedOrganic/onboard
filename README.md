@@ -12,8 +12,8 @@ ships as **one static Go binary** that is **both an MCP server and a CLI install
 > tools. The whole point of onboard being an MCP server is that *every* agent speaks it, so
 > one binary reaches all of them.
 
-Any MCP-capable agent — Claude Code, Codex, Grok, Kimi CLI, opencode, Cursor, Copilot CLI,
-Junie CLI — can launch it, and a CI pipeline or custom harness can drive it over HTTP.
+Any MCP-capable agent — Claude Code, Codex, Grok, Kimi CLI, Gemini CLI, opencode, Cursor,
+Copilot CLI, Junie CLI — can launch it, and a CI pipeline or custom harness can drive it over HTTP.
 
 It's especially pointed at *fast* and *AI-generated* code — the kind that arrives faster
 than any mental model can form. The walkthrough is as much a **verification** tool as a

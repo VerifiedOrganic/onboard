@@ -489,8 +489,8 @@ func TestRegistryShapes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) < 8 {
-		t.Errorf("expected >=8 agents, got %d", len(all))
+	if len(all) < 9 {
+		t.Errorf("expected >=9 agents, got %d", len(all))
 	}
 	byName := map[string]Agent{}
 	for _, a := range all {
@@ -504,6 +504,9 @@ func TestRegistryShapes(t *testing.T) {
 	}
 	if byName["kimi"].Shape != ShapeJSONMCPServers {
 		t.Error("kimi should be JSON mcpServers")
+	}
+	if byName["gemini"].Shape != ShapeJSONMCPServers {
+		t.Error("gemini should be JSON mcpServers")
 	}
 	if byName["opencode"].Shape != ShapeJSONOpencode {
 		t.Error("opencode should be the JSON opencode outlier shape")
@@ -534,6 +537,12 @@ func TestRegistryShapes(t *testing.T) {
 	}
 	if !strings.HasSuffix(byName["kimi"].SkillsDir, filepath.Join(".kimi-code", "skills")) {
 		t.Errorf("kimi skills path = %q", byName["kimi"].SkillsDir)
+	}
+	if !strings.HasSuffix(byName["gemini"].ConfigPath, filepath.Join(".gemini", "settings.json")) {
+		t.Errorf("gemini config path = %q", byName["gemini"].ConfigPath)
+	}
+	if !strings.HasSuffix(byName["gemini"].SkillsDir, filepath.Join(".gemini", "skills")) {
+		t.Errorf("gemini skills path = %q", byName["gemini"].SkillsDir)
 	}
 }
 
@@ -603,6 +612,79 @@ func TestRegistryHonorsKimiCodeHome(t *testing.T) {
 	}
 	if kimi.SkillsDir != filepath.Join(dir, "skills") {
 		t.Errorf("kimi skills dir = %q, want KIMI_CODE_HOME skills", kimi.SkillsDir)
+	}
+}
+
+func TestGeminiRegistryInstallLifecycle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	geminiDir := filepath.Join(home, ".gemini")
+	if err := os.MkdirAll(geminiDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	settings := filepath.Join(geminiDir, "settings.json")
+	writeJSON(t, settings, map[string]any{
+		"theme": "dark",
+		"mcpServers": map[string]any{
+			"other": map[string]any{"command": "x"},
+		},
+	})
+
+	gemini, err := Find("gemini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gemini.Shape != ShapeJSONMCPServers {
+		t.Fatalf("gemini shape = %v, want ShapeJSONMCPServers", gemini.Shape)
+	}
+	if gemini.ConfigPath != settings {
+		t.Fatalf("gemini config path = %q, want %q", gemini.ConfigPath, settings)
+	}
+	if gemini.SkillsDir != filepath.Join(geminiDir, "skills") {
+		t.Fatalf("gemini skills dir = %q", gemini.SkillsDir)
+	}
+	if !Detected(gemini) {
+		t.Fatal("gemini should be detected when .gemini/settings.json exists")
+	}
+
+	res, err := Install(gemini, "/bin/onboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ConfigAction != "merged" {
+		t.Fatalf("install ConfigAction = %q, want merged", res.ConfigAction)
+	}
+	root := readJSON(t, settings)
+	if root["theme"] != "dark" {
+		t.Fatalf("install clobbered root keys: %v", root)
+	}
+	servers := root["mcpServers"].(map[string]any)
+	if _, ok := servers["other"]; !ok {
+		t.Fatalf("install dropped sibling server: %v", servers)
+	}
+	onboard := servers["onboard"].(map[string]any)
+	if onboard["command"] != "/bin/onboard" {
+		t.Fatalf("onboard command = %v", onboard["command"])
+	}
+
+	res, err = Install(gemini, "/bin/onboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ConfigAction != "already-present" {
+		t.Fatalf("second install ConfigAction = %q, want already-present", res.ConfigAction)
+	}
+
+	if _, err := Uninstall(gemini); err != nil {
+		t.Fatal(err)
+	}
+	root = readJSON(t, settings)
+	servers = root["mcpServers"].(map[string]any)
+	if _, ok := servers["onboard"]; ok {
+		t.Fatalf("uninstall left onboard entry: %v", servers)
+	}
+	if _, ok := servers["other"]; !ok {
+		t.Fatalf("uninstall dropped sibling server: %v", servers)
 	}
 }
 

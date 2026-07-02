@@ -44,7 +44,7 @@ const (
 
 // Agent describes how to install onboard into a particular coding agent.
 type Agent struct {
-	Name       string // canonical id: claude, codex, grok, opencode, cursor, copilot, junie
+	Name       string // canonical id: claude, codex, grok, kimi, gemini, opencode, cursor, copilot, junie
 	SkillsDir  string // absolute dir for native skill files
 	ConfigPath string // absolute path to the agent's MCP config file
 	Shape      Shape  // how the server entry is encoded
@@ -108,6 +108,7 @@ func Registry() ([]Agent, error) {
 		{Name: "codex", SkillsDir: filepath.Join(codexHome, "skills"), ConfigPath: filepath.Join(codexHome, "config.toml"), Shape: ShapeTOMLMCPServers},
 		grok,
 		{Name: "kimi", SkillsDir: filepath.Join(kimiHome, "skills"), ConfigPath: filepath.Join(kimiHome, "mcp.json"), Shape: ShapeJSONMCPServers},
+		{Name: "gemini", SkillsDir: j(".gemini", "skills"), ConfigPath: j(".gemini", "settings.json"), Shape: ShapeJSONMCPServers},
 		{Name: "opencode", SkillsDir: j(".config", "opencode", "skills"), ConfigPath: j(".config", "opencode", "opencode.json"), Shape: ShapeJSONOpencode},
 		{Name: "cursor", SkillsDir: j(".cursor", "skills"), ConfigPath: j(".cursor", "mcp.json"), Shape: ShapeJSONMCPServers},
 		{Name: "copilot", SkillsDir: filepath.Join(copilotHome, "skills"), ConfigPath: filepath.Join(copilotHome, "mcp-config.json"), Shape: ShapeJSONMCPServersWithTools},
@@ -127,7 +128,7 @@ func Find(name string) (Agent, error) {
 			return a, nil
 		}
 	}
-	return Agent{}, fmt.Errorf("unknown agent %q (known: claude, codex, grok, kimi, opencode, cursor, copilot, junie)", name)
+	return Agent{}, fmt.Errorf("unknown agent %q (known: claude, codex, grok, kimi, gemini, opencode, cursor, copilot, junie)", name)
 }
 
 // Detected reports whether the agent appears installed (its config exists or its
