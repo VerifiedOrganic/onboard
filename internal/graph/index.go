@@ -16,6 +16,11 @@ import (
 
 const graphIndexTimeout = 10 * time.Minute
 
+var (
+	enrichGo   = precision.EnrichGo
+	enrichRust = precision.EnrichRust
+)
+
 // Service indexes repositories with in-memory caching and optional semantic enrichment.
 type Service struct {
 	cache  *Cache
@@ -68,11 +73,17 @@ func (s *Service) Index(ctx context.Context, root string, refresh, precise bool)
 			}
 		}
 		if precise {
-			if _, err := precision.EnrichGo(buildCtx, root, g); err != nil && s.logger != nil {
-				s.logger.Warn("go precision enrichment failed", "root", root, "err", err)
+			if _, err := enrichGo(buildCtx, root, g); err != nil {
+				if s.logger != nil {
+					s.logger.Warn("go precision enrichment failed", "root", root, "err", err)
+				}
+				g.AddPrecisionNote("go precision enrichment failed: " + err.Error())
 			}
-			if _, err := precision.EnrichRust(buildCtx, root, g); err != nil && s.logger != nil {
-				s.logger.Warn("rust precision enrichment failed", "root", root, "err", err)
+			if _, err := enrichRust(buildCtx, root, g); err != nil {
+				if s.logger != nil {
+					s.logger.Warn("rust precision enrichment failed", "root", root, "err", err)
+				}
+				g.AddPrecisionNote("rust precision enrichment failed: " + err.Error())
 			}
 		}
 		s.cache.Store(key, g)
