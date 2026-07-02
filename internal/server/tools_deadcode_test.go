@@ -193,3 +193,41 @@ export function action() { return null; }
 		t.Errorf("non-route utility action should remain a dead-code lead; got %+v", out.Orphans)
 	}
 }
+
+func TestDeadCodeHCLUnusedVariablesReported(t *testing.T) {
+	root := t.TempDir()
+	writeRepoFile(t, root, "main.tf", `
+variable "used" {}
+variable "unused" {}
+locals { unused_local = 1 }
+resource "null_resource" "r" { triggers = { v = var.used } }
+output "o" { value = var.used }
+`)
+
+	out, err := deadCode(context.Background(), deadCodeInput{Root: root, Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]orphan{}
+	for _, o := range out.Orphans {
+		got[o.Symbol] = o
+	}
+
+	if o, ok := got["var.unused"]; !ok {
+		t.Fatalf("unused HCL variable should be reported; got %+v", out.Orphans)
+	} else if o.Kind != "variable" || o.Confidence != "high" {
+		t.Fatalf("var.unused = kind %q confidence %q, want variable high", o.Kind, o.Confidence)
+	}
+	if o, ok := got["local.unused_local"]; !ok {
+		t.Fatalf("unused HCL local should be reported; got %+v", out.Orphans)
+	} else if o.Kind != "local" || o.Confidence != "high" {
+		t.Fatalf("local.unused_local = kind %q confidence %q, want local high", o.Kind, o.Confidence)
+	}
+
+	for _, alive := range []string{"var.used", "resource.null_resource.r"} {
+		if _, bad := got[alive]; bad {
+			t.Fatalf("%s should not be reported as dead; got %+v", alive, out.Orphans)
+		}
+	}
+}
