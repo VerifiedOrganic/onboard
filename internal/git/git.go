@@ -71,6 +71,9 @@ type Change struct {
 
 // DiffNameStatus returns the files changed from fromSHA to HEAD.
 func DiffNameStatus(ctx context.Context, root, fromSHA string) ([]Change, error) {
+	if err := ValidateRef(ctx, root, fromSHA); err != nil {
+		return nil, fmt.Errorf("diff name-status from %q: %w", fromSHA, err)
+	}
 	out, err := run(ctx, root, "diff", "--name-status", "-z", fromSHA+"..HEAD")
 	if err != nil {
 		return nil, err

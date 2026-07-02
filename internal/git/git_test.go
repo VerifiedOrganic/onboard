@@ -2,11 +2,14 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/apperrors"
 )
 
 // initRepo creates an isolated git repo with one commit and returns its path.
@@ -145,6 +148,10 @@ func TestDiffNameStatus(t *testing.T) {
 	head, _ := HeadSHA(ctx, repo)
 	if c, _ := DiffNameStatus(ctx, repo, head); len(c) != 0 {
 		t.Errorf("expected no changes from HEAD..HEAD, got %v", c)
+	}
+
+	if _, err := DiffNameStatus(ctx, repo, "-evil"); !errors.Is(err, apperrors.ErrInvalidGitRef) {
+		t.Fatalf("DiffNameStatus with invalid ref err = %v, want ErrInvalidGitRef", err)
 	}
 }
 
