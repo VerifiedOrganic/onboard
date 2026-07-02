@@ -109,7 +109,8 @@ func TestReadWrapsOSError(t *testing.T) {
 
 func TestWriteRejectsUnknownMode(t *testing.T) {
 	repo := initRepo(t)
-	if _, err := Write(context.Background(), repo, "# Guide\n", "partial", time.Now()); err == nil {
+	fixed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := Write(context.Background(), repo, "# Guide\n", "partial", fixed); err == nil {
 		t.Fatal("expected unknown guide mode to be rejected")
 	}
 }
