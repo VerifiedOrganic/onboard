@@ -200,10 +200,19 @@ func detectWorkspacesAndTools(root, rel string, raw rawPackageJSON, workspaces [
 	}
 
 	if checkDep("nx") || hasFile("nx.json") {
-		tools = append(tools, "Nx")
+		tools = append(tools, "nx")
 	}
 	if checkDep("turbo") || hasFile("turbo.json") {
-		tools = append(tools, "Turbo")
+		tools = append(tools, "turborepo")
+	}
+	if hasFile("lerna.json") {
+		tools = append(tools, "lerna")
+	}
+	if hasFile("WORKSPACE") || hasFile("WORKSPACE.bazel") || hasFile("MODULE.bazel") {
+		tools = append(tools, "bazel")
+	}
+	if hasFile("Chart.yaml") {
+		tools = append(tools, "helm chart")
 	}
 	if checkDep("vite") || hasFile("vite.config.ts") || hasFile("vite.config.js") || hasFile("vite.config.mts") {
 		tools = append(tools, "Vite")
