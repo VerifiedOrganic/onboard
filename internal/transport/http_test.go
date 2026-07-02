@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -95,5 +96,27 @@ func TestOriginValidation(t *testing.T) {
 				t.Fatalf("inner handler invoked = %v, want %v", invoked, tt.wantInvoked)
 			}
 		})
+	}
+}
+
+func TestObservedHandlerRejectsOversizedBody(t *testing.T) {
+	t.Parallel()
+
+	var readErr error
+	handler := observedHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, readErr = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}), "secret", 1024, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(strings.Repeat("x", 2048)))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if readErr == nil {
+		t.Fatal("ReadAll error = nil, want oversized body error")
+	}
+	if !strings.Contains(readErr.Error(), "request body too large") {
+		t.Fatalf("ReadAll error = %q, want request body too large", readErr.Error())
 	}
 }
