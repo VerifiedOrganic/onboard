@@ -13,7 +13,7 @@ import (
 
 // Deps holds injectable server dependencies.
 type Deps struct {
-	Graph  *graph.Service
+	Graph  GraphIndexer
 	Git    GitPort
 	Guide  GuidePort
 	Roots  pathutil.RootPolicy
