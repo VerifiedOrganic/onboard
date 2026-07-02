@@ -41,7 +41,7 @@ func Available(ctx context.Context, root string) bool {
 func CommonDir(ctx context.Context, root string) (string, error) {
 	out, err := run(ctx, root, "rev-parse", "--git-common-dir")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("git common dir: %w", err)
 	}
 	dir := strings.TrimSpace(out)
 	if !filepath.IsAbs(dir) {
@@ -71,9 +71,12 @@ type Change struct {
 
 // DiffNameStatus returns the files changed from fromSHA to HEAD.
 func DiffNameStatus(ctx context.Context, root, fromSHA string) ([]Change, error) {
+	if err := ValidateRef(ctx, root, fromSHA); err != nil {
+		return nil, fmt.Errorf("diff name-status from %q: %w", fromSHA, err)
+	}
 	out, err := run(ctx, root, "diff", "--name-status", "-z", fromSHA+"..HEAD")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("diff name-status: %w", err)
 	}
 	return parseNameStatusZ(out), nil
 }
@@ -143,29 +146,32 @@ func ValidateRef(ctx context.Context, root, ref string) error {
 // diff). unified=0 keeps the hunks tight so they attribute to symbols precisely.
 func Diff(ctx context.Context, root, base string) ([]FileDiff, error) {
 	if err := ValidateRef(ctx, root, base); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git diff from %q: %w", base, err)
 	}
 	out, err := run(ctx, root, "diff", "--unified=0", "--no-color", "--find-renames", base, "--")
 	if err != nil {
+		return nil, fmt.Errorf("git diff: %w", err)
+	}
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
 		return nil, err
 	}
-	return parseUnifiedDiff(out), nil
+	return files, nil
 }
 
 // ArchiveTree materializes ref into dst using `git archive`. It is intended for read-only
 // analysis of base-side state, such as computing the blast radius of deleted symbols.
 func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 	if err := ValidateRef(ctx, root, ref); err != nil {
-		return err
+		return fmt.Errorf("archive git tree from %q: %w", ref, err)
 	}
-	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", ref)
+	cmd := newGitCmd(ctx, root, "archive", "--format=tar", ref)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return fmt.Errorf("extract git archive: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return err
+		return fmt.Errorf("extract git archive: %w", err)
 	}
 
 	tr := tar.NewReader(stdout)
@@ -177,7 +183,7 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 		}
 		if err != nil {
 			_ = cmd.Wait()
-			return err
+			return fmt.Errorf("extract git archive: %w", err)
 		}
 		name := filepath.Clean(filepath.FromSlash(hdr.Name))
 		isCurrentOrParent := name == "." || name == ".."
@@ -185,20 +191,24 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 		escapesArchiveRoot := strings.HasPrefix(name, ".."+string(filepath.Separator))
 		if isCurrentOrParent || isAbsolute || escapesArchiveRoot {
 			_ = cmd.Wait()
-			return fmt.Errorf("git archive contained unsafe path %q", hdr.Name)
+			return fmt.Errorf("%w: git archive contained unsafe path %q", apperrors.ErrPathEscapesRoot, hdr.Name)
 		}
 		target := filepath.Join(dst, name)
 		rel, err := filepath.Rel(dst, target)
 		relEscapesDestination := rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
-		if err != nil || relEscapesDestination {
+		if err != nil {
 			_ = cmd.Wait()
-			return fmt.Errorf("git archive path %q escapes destination", hdr.Name)
+			return fmt.Errorf("extract git archive: %w", err)
+		}
+		if relEscapesDestination {
+			_ = cmd.Wait()
+			return fmt.Errorf("%w: git archive path %q escapes destination", apperrors.ErrPathEscapesRoot, hdr.Name)
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o700); err != nil {
 				_ = cmd.Wait()
-				return err
+				return fmt.Errorf("extract git archive: %w", err)
 			}
 		case tar.TypeReg:
 			if hdr.Size < 0 || hdr.Size > maxArchiveFileBytes {
@@ -212,27 +222,30 @@ func ArchiveTree(ctx context.Context, root, ref, dst string) error {
 			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				_ = cmd.Wait()
-				return err
+				return fmt.Errorf("extract git archive: %w", err)
 			}
 			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, tarFilePerm(hdr.Mode))
 			if err != nil {
 				_ = cmd.Wait()
-				return err
+				return fmt.Errorf("extract git archive: %w", err)
 			}
 			// #nosec G110 -- git archive extraction is bounded by per-file and total byte limits above.
 			_, copyErr := io.CopyN(f, tr, hdr.Size)
 			closeErr := f.Close()
 			if copyErr != nil {
 				_ = cmd.Wait()
-				return copyErr
+				return fmt.Errorf("extract git archive: %w", copyErr)
 			}
 			if closeErr != nil {
 				_ = cmd.Wait()
-				return closeErr
+				return fmt.Errorf("extract git archive: %w", closeErr)
 			}
 		}
 	}
-	return cmd.Wait()
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("extract git archive: %w", err)
+	}
+	return nil
 }
 
 func tarFilePerm(mode int64) os.FileMode {
@@ -246,7 +259,7 @@ func tarFilePerm(mode int64) os.FileMode {
 
 // parseUnifiedDiff parses `git diff --unified=0` output into per-file changes. It is a
 // pure function (no git invocation) so the parsing is unit-testable on canned input.
-func parseUnifiedDiff(out string) []FileDiff {
+func parseUnifiedDiff(out string) ([]FileDiff, error) {
 	var files []FileDiff
 	var cur *FileDiff
 	flush := func() {
@@ -274,13 +287,17 @@ func parseUnifiedDiff(out string) []FileDiff {
 				cur.Path = p
 			}
 		case strings.HasPrefix(line, "@@"):
-			if h, ok := parseHunkHeader(line); ok {
+			h, ok, err := parseHunkHeader(line)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
 				cur.Hunks = append(cur.Hunks, h)
 			}
 		}
 	}
 	flush()
-	return files
+	return files, nil
 }
 
 // diffGitBPath extracts the new-side path from a "diff --git a/old b/new" header.
@@ -302,29 +319,51 @@ func plusPath(line string) string {
 }
 
 // parseHunkHeader reads the new-side range from a "@@ -a,b +c,d @@" hunk header.
-func parseHunkHeader(line string) (Hunk, bool) {
-	plus := strings.IndexByte(line, '+')
-	if plus < 0 {
-		return Hunk{}, false
+func parseHunkHeader(line string) (Hunk, bool, error) {
+	fields := strings.Fields(line)
+	if len(fields) < 3 || fields[0] != "@@" {
+		return Hunk{}, false, fmt.Errorf("parse diff hunk header %q: malformed header", line)
 	}
-	tok := line[plus+1:]
-	if sp := strings.IndexByte(tok, ' '); sp >= 0 {
-		tok = tok[:sp]
+	if _, _, err := parseDiffRange(fields[1], '-'); err != nil {
+		return Hunk{}, false, fmt.Errorf("parse diff hunk header %q: %w", line, err)
 	}
-	start, count := 0, 1
-	if comma := strings.IndexByte(tok, ','); comma >= 0 {
-		start, _ = strconv.Atoi(tok[:comma])
-		count, _ = strconv.Atoi(tok[comma+1:])
-	} else {
-		start, _ = strconv.Atoi(tok)
+	start, count, err := parseDiffRange(fields[2], '+')
+	if err != nil {
+		return Hunk{}, false, fmt.Errorf("parse diff hunk header %q: %w", line, err)
 	}
 	if start == 0 { // a 0,0 new-side means the change is a pure deletion — no new lines
-		return Hunk{}, false
+		return Hunk{}, false, nil
 	}
 	if count <= 0 {
 		count = 1
 	}
-	return Hunk{Start: start, End: start + count - 1}, true
+	return Hunk{Start: start, End: start + count - 1}, true, nil
+}
+
+func parseDiffRange(tok string, prefix byte) (int, int, error) {
+	if len(tok) < 2 || tok[0] != prefix {
+		return 0, 0, fmt.Errorf("range %q missing %c prefix", tok, prefix)
+	}
+	tok = tok[1:]
+	count := 1
+	var err error
+	var start int
+	if comma := strings.IndexByte(tok, ','); comma >= 0 {
+		start, err = strconv.Atoi(tok[:comma])
+		if err != nil {
+			return 0, 0, err
+		}
+		count, err = strconv.Atoi(tok[comma+1:])
+		if err != nil {
+			return 0, 0, err
+		}
+		return start, count, nil
+	}
+	start, err = strconv.Atoi(tok)
+	if err != nil {
+		return 0, 0, err
+	}
+	return start, count, nil
 }
 
 // RefExists reports whether ref resolves to a commit.
@@ -376,7 +415,7 @@ func History(ctx context.Context, root string, maxCommits int) ([]FileStat, erro
 	}
 	out, err := run(ctx, root, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git history: %w", err)
 	}
 
 	type agg struct {
@@ -470,8 +509,7 @@ func run(ctx context.Context, root string, args ...string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
 	defer cancel()
-	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd := newGitCmd(ctx, root, args...)
 	out, err := cmd.Output()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return string(out), fmt.Errorf("git %s timed out after %s: %w", strings.Join(args, " "), gitCommandTimeout, ctx.Err())
@@ -487,4 +525,13 @@ func run(ctx context.Context, root string, args ...string) (string, error) {
 		return string(out), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return string(out), nil
+}
+
+// newGitCmd builds a git invocation with a hardened environment: C locale so
+// error classification is stable, no credential prompts, no optional locks.
+func newGitCmd(ctx context.Context, root string, args ...string) *exec.Cmd {
+	// #nosec G204 -- git is the fixed executable and arguments are not shell-expanded.
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANGUAGE=C", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	return cmd
 }

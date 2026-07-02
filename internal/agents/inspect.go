@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 
 	"github.com/VerifiedOrganic/onboard/internal/skills"
@@ -18,17 +19,18 @@ import (
 
 // Health is the result of inspecting one agent's onboard installation.
 type Health struct {
-	Agent          string   `json:"agent"`
-	Detected       bool     `json:"detected"`
-	ConfigPath     string   `json:"config_path"`
-	ConfigPresent  bool     `json:"config_present"`
-	Registered     bool     `json:"registered"`
-	ConfiguredBin  string   `json:"configured_bin,omitempty"`
-	BinExists      bool     `json:"bin_exists"`
-	SkillsDir      string   `json:"skills_dir"`
-	SkillsPresent  int      `json:"skills_present"`
-	SkillsExpected int      `json:"skills_expected"`
-	Issues         []string `json:"issues,omitempty"`
+	Agent           string   `json:"agent"`
+	Detected        bool     `json:"detected"`
+	ConfigPath      string   `json:"config_path"`
+	ConfigPresent   bool     `json:"config_present"`
+	Registered      bool     `json:"registered"`
+	ConfiguredBin   string   `json:"configured_bin,omitempty"`
+	BinExists       bool     `json:"bin_exists"`
+	SkillsDir       string   `json:"skills_dir"`
+	SkillsPresent   int      `json:"skills_present"`
+	SkillsExpected  int      `json:"skills_expected"`
+	LegacySkillDirs []string `json:"legacy_skill_dirs,omitempty"`
+	Issues          []string `json:"issues,omitempty"`
 }
 
 // OK reports whether the install is healthy enough to use: onboard is registered, the
@@ -59,6 +61,7 @@ func Inspect(a Agent) Health {
 					h.SkillsPresent++
 				}
 			}
+			h.LegacySkillDirs = legacySkillDirs(a.SkillsDir)
 		}
 	}
 
@@ -77,6 +80,17 @@ func Inspect(a Agent) Health {
 		h.Issues = append(h.Issues, fmt.Sprintf("skills incomplete: %d of %d present in %s (run install)", h.SkillsPresent, h.SkillsExpected, a.SkillsDir))
 	}
 	return h
+}
+
+func legacySkillDirs(skillsDir string) []string {
+	var out []string
+	for legacy, canonical := range skills.LegacyAliases() {
+		if exists(filepath.Join(skillsDir, canonical)) && looksLikeLegacyOnboardSkill(filepath.Join(skillsDir, legacy), legacy) {
+			out = append(out, legacy)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // configuredBin returns the binary path onboard is registered with in the agent's config,

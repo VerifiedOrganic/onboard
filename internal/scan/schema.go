@@ -215,7 +215,7 @@ func RenderERD(entities []Entity, rels []Relationship) string {
 	var b strings.Builder
 	b.WriteString("erDiagram\n")
 	for _, e := range entities {
-		b.WriteString(fmt.Sprintf("  %s {\n", ERDToken(e.Name)))
+		fmt.Fprintf(&b, "  %s {\n", ERDToken(e.Name))
 		for _, c := range e.Columns {
 			typ := ERDToken(c.Type)
 			if typ == "" {
@@ -230,7 +230,7 @@ func RenderERD(entities []Entity, rels []Relationship) string {
 			case c.FK:
 				key = " FK"
 			}
-			b.WriteString(fmt.Sprintf("    %s %s%s\n", typ, ERDToken(c.Name), key))
+			fmt.Fprintf(&b, "    %s %s%s\n", typ, ERDToken(c.Name), key)
 		}
 		b.WriteString("  }\n")
 	}
@@ -239,7 +239,7 @@ func RenderERD(entities []Entity, rels []Relationship) string {
 		if label == "" {
 			label = "fk"
 		}
-		b.WriteString(fmt.Sprintf("  %s ||--o{ %s : %q\n", ERDToken(r.To), ERDToken(r.From), label))
+		fmt.Fprintf(&b, "  %s ||--o{ %s : %q\n", ERDToken(r.To), ERDToken(r.From), label)
 	}
 	return b.String()
 }

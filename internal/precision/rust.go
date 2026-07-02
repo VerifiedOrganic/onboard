@@ -24,6 +24,7 @@ import (
 const (
 	rustPrecisionTimeout = 75 * time.Second
 	maxRustPreciseSyms   = 300
+	maxLSPBodyBytes      = 64 << 20
 )
 
 // EnrichRust augments g in place with rust-analyzer call-hierarchy edges when the
@@ -519,6 +520,9 @@ func (c *rustAnalyzerClient) read() (lspMessage, error) {
 	}
 	if length < 0 {
 		return lspMessage{}, errors.New("missing lsp content-length")
+	}
+	if length <= 0 || length > maxLSPBodyBytes {
+		return lspMessage{}, fmt.Errorf("lsp message content-length %d out of bounds", length)
 	}
 	body := make([]byte, length)
 	if _, err := io.ReadFull(c.stdout, body); err != nil {

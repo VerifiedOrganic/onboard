@@ -12,8 +12,8 @@ ships as **one static Go binary** that is **both an MCP server and a CLI install
 > tools. The whole point of onboard being an MCP server is that *every* agent speaks it, so
 > one binary reaches all of them.
 
-Any MCP-capable agent — Claude Code, Codex, Grok, Kimi CLI, opencode, Cursor, Copilot CLI,
-Junie CLI — can launch it, and a CI pipeline or custom harness can drive it over HTTP.
+Any MCP-capable agent — Claude Code, Codex, Grok, Kimi CLI, Gemini CLI, opencode, Cursor,
+Copilot CLI, Junie CLI — can launch it, and a CI pipeline or custom harness can drive it over HTTP.
 
 It's especially pointed at *fast* and *AI-generated* code — the kind that arrives faster
 than any mental model can form. The walkthrough is as much a **verification** tool as a
@@ -60,6 +60,19 @@ loopback unless you put it behind your own auth, TLS, and network controls.
 
 New here? **[docs/getting-started.md](docs/getting-started.md)** is the unhurried version
 of the above, with what-you-should-see at each step.
+
+## Testing
+
+Use `make test` for the standard local suite and `make test-race` when touching concurrent
+code. `make check` is the full local CI gate: tidy check, gofmt check, vet, pinned
+golangci-lint, and tests. CI enforces a 65% coverage floor; use `make cover` to inspect
+the current total locally.
+
+## Architecture
+
+The implementation overview lives in [docs/architecture.md](docs/architecture.md),
+including the current Mermaid architecture diagram. Start there before changing server
+ports, graph indexing, installers, or transport boundaries.
 
 ## What you actually get
 
@@ -110,6 +123,7 @@ The docs are arranged by what you're trying to do, not by what's easiest to writ
 | **Use it** — install, verify, run your first walkthrough | [getting-started.md](docs/getting-started.md) · [install.md](docs/install.md) |
 | **Understand it** — the mental model before the internals | [concepts.md](docs/concepts.md) |
 | **Integrate it** — the tool, skill, and prompt contracts | [mcp-tools.md](docs/mcp-tools.md) · [skills.md](docs/skills.md) · [guide-cache.md](docs/guide-cache.md) |
+| **Run it in CI** — PR blast-radius on every push | [ci.md](docs/ci.md) |
 | **Build on it** — hack on onboard's own Go internals | [architecture.md](docs/architecture.md) · [code-graph.md](docs/code-graph.md) · [development.md](docs/development.md) |
 | **See why it's built this way** | [research-notes.md](docs/research-notes.md) · [enhancements.md](docs/enhancements.md) |
 

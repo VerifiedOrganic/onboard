@@ -14,6 +14,8 @@ for supported agents, and can run as an MCP server. This page is the trust bound
 - **Syntactic analysis first.** The code graph is built locally with embedded tree-sitter
   grammars. Optional Go/Rust precise mode may invoke local toolchains (`go` or
   `rust-analyzer`) if present.
+- **Optional root allowlist.** Set `ONBOARD_ALLOWED_ROOT` to a comma-separated list of
+  paths to restrict tool roots in both stdio and HTTP modes.
 
 ## What It Reads
 

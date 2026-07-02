@@ -2,18 +2,21 @@ package guide
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/VerifiedOrganic/onboard/internal/testenv"
 )
 
 func initRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
+		testenv.SkipUnlessTool(t, "git not on PATH")
 	}
 	dir := t.TempDir()
 	run := func(args ...string) {
@@ -85,9 +88,29 @@ func TestReadMissing(t *testing.T) {
 	}
 }
 
+func TestReadWrapsOSError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".onboard"), []byte("not a directory\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Read(context.Background(), root)
+	if err == nil {
+		t.Fatal("Read error = nil, want wrapped os error")
+	}
+	if !strings.Contains(err.Error(), "read guide") {
+		t.Fatalf("Read error = %q, want read guide context", err.Error())
+	}
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("Read error = %T %[1]v, want *os.PathError in chain", err)
+	}
+}
+
 func TestWriteRejectsUnknownMode(t *testing.T) {
 	repo := initRepo(t)
-	if _, err := Write(context.Background(), repo, "# Guide\n", "partial", time.Now()); err == nil {
+	fixed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := Write(context.Background(), repo, "# Guide\n", "partial", fixed); err == nil {
 		t.Fatal("expected unknown guide mode to be rejected")
 	}
 }

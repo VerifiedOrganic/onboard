@@ -11,20 +11,21 @@ import (
 
 	"github.com/VerifiedOrganic/onboard/internal/indexer"
 	"github.com/VerifiedOrganic/onboard/internal/precision"
+	"github.com/VerifiedOrganic/onboard/internal/testenv"
 )
 
 func TestEnrichRustWithRustAnalyzer(t *testing.T) {
 	if _, err := exec.LookPath("cargo"); err != nil {
-		t.Skip("cargo not installed")
+		testenv.SkipUnlessTool(t, "cargo not installed")
 	}
 	if _, err := exec.LookPath("rust-analyzer"); err != nil {
-		t.Skip("rust-analyzer not installed")
+		testenv.SkipUnlessTool(t, "rust-analyzer not installed")
 	}
 	root := t.TempDir()
 	writeRustPrecisionFixture(t, root, "Cargo.toml", "[package]\nname = \"smoke\"\nversion = \"0.1.0\"\nedition = \"2021\"\n")
 	writeRustPrecisionFixture(t, root, "src/lib.rs", "pub fn helper() -> i32 { 1 }\npub fn run() -> i32 { helper() }\n")
 	if !precision.RustAnalyzerAvailable(root) {
-		t.Skip("rust-analyzer binary is present but cannot run for this toolchain")
+		testenv.SkipUnlessTool(t, "rust-analyzer binary is present but cannot run for this toolchain")
 	}
 	g, err := indexer.Builtin{}.Index(context.Background(), root)
 	if err != nil {

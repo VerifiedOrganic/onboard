@@ -183,11 +183,13 @@ func (g *Graph) FindSymbols(query string) []*Symbol {
 			}
 		}
 	}
-	out := append(exact, sub...)
-	slices.SortFunc(out, func(a, b *Symbol) int {
+	slices.SortFunc(exact, func(a, b *Symbol) int {
 		return cmp.Compare(a.QName, b.QName)
 	})
-	return out
+	slices.SortFunc(sub, func(a, b *Symbol) int {
+		return cmp.Compare(a.QName, b.QName)
+	})
+	return append(exact, sub...)
 }
 
 // PageRank-based ranking (PageRank, expandSeeds) lives in pagerank.go.

@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,5 +53,70 @@ func TestMetricsHandlerRequiresBearer(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestOriginValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		origin      string
+		wantStatus  int
+		wantInvoked bool
+	}{
+		{name: "no origin", wantStatus: http.StatusNoContent, wantInvoked: true},
+		{name: "localhost origin", origin: "http://localhost:5173", wantStatus: http.StatusNoContent, wantInvoked: true},
+		{name: "loopback origin", origin: "http://127.0.0.1:8080", wantStatus: http.StatusNoContent, wantInvoked: true},
+		{name: "external origin", origin: "https://evil.example", wantStatus: http.StatusForbidden, wantInvoked: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			invoked := false
+			handler := observedHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				invoked = true
+				w.WriteHeader(http.StatusNoContent)
+			}), "secret", 1024, nil, nil)
+
+			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			req.Header.Set("Authorization", "Bearer secret")
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if invoked != tt.wantInvoked {
+				t.Fatalf("inner handler invoked = %v, want %v", invoked, tt.wantInvoked)
+			}
+		})
+	}
+}
+
+func TestObservedHandlerRejectsOversizedBody(t *testing.T) {
+	t.Parallel()
+
+	var readErr error
+	handler := observedHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, readErr = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}), "secret", 1024, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(strings.Repeat("x", 2048)))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if readErr == nil {
+		t.Fatal("ReadAll error = nil, want oversized body error")
+	}
+	if !strings.Contains(readErr.Error(), "request body too large") {
+		t.Fatalf("ReadAll error = %q, want request body too large", readErr.Error())
 	}
 }

@@ -52,3 +52,31 @@ func TestHardenHTTPHandlerCapsBody(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
 	}
 }
+
+func TestRootPolicyOptions(t *testing.T) {
+	t.Parallel()
+
+	wd := t.TempDir()
+	tests := []struct {
+		name           string
+		httpMode       bool
+		allowedRootEnv string
+		wantLen        int
+	}{
+		{name: "stdio env unset", httpMode: false, allowedRootEnv: "", wantLen: 0},
+		{name: "stdio env blank", httpMode: false, allowedRootEnv: "  ", wantLen: 0},
+		{name: "stdio env set", httpMode: false, allowedRootEnv: "/tmp/x", wantLen: 1},
+		{name: "http env unset", httpMode: true, allowedRootEnv: "", wantLen: 1},
+		{name: "http env set", httpMode: true, allowedRootEnv: "/tmp/x", wantLen: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := len(rootPolicyOptions(tt.httpMode, tt.allowedRootEnv, wd)); got != tt.wantLen {
+				t.Fatalf("len(rootPolicyOptions(%v, %q, %q)) = %d, want %d", tt.httpMode, tt.allowedRootEnv, wd, got, tt.wantLen)
+			}
+		})
+	}
+}

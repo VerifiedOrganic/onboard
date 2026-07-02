@@ -2,9 +2,12 @@ module github.com/VerifiedOrganic/onboard
 
 go 1.26.0
 
+toolchain go1.26.4
+
 require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/odvcencio/gotreesitter v0.19.1
+	github.com/pelletier/go-toml/v2 v2.4.2
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/mod v0.33.0
 	golang.org/x/sync v0.19.0

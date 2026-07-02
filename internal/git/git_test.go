@@ -2,17 +2,23 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+
+	"github.com/VerifiedOrganic/onboard/internal/apperrors"
+	"github.com/VerifiedOrganic/onboard/internal/testenv"
 )
 
 // initRepo creates an isolated git repo with one commit and returns its path.
 func initRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
+		testenv.SkipUnlessTool(t, "git not on PATH")
 	}
 	dir := t.TempDir()
 	run := func(args ...string) {
@@ -52,6 +58,31 @@ func commit(t *testing.T, dir, file, content, msg string) {
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestNewGitCmdHardenedEnv(t *testing.T) {
+	t.Parallel()
+
+	cmd := newGitCmd(context.Background(), "/tmp/r", "status")
+	wantArgs := []string{"git", "-C", "/tmp/r", "status"}
+	if !slices.Equal(cmd.Args, wantArgs) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, wantArgs)
+	}
+
+	env := map[string]bool{}
+	for _, kv := range cmd.Env {
+		env[kv] = true
+	}
+	for _, want := range []string{
+		"LC_ALL=C",
+		"LANGUAGE=C",
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_OPTIONAL_LOCKS=0",
+	} {
+		if !env[want] {
+			t.Fatalf("cmd.Env missing %q; env=%v", want, cmd.Env)
 		}
 	}
 }
@@ -120,6 +151,90 @@ func TestDiffNameStatus(t *testing.T) {
 	if c, _ := DiffNameStatus(ctx, repo, head); len(c) != 0 {
 		t.Errorf("expected no changes from HEAD..HEAD, got %v", c)
 	}
+
+	if _, err := DiffNameStatus(ctx, repo, "-evil"); !errors.Is(err, apperrors.ErrInvalidGitRef) {
+		t.Fatalf("DiffNameStatus with invalid ref err = %v, want ErrInvalidGitRef", err)
+	}
+}
+
+func TestGitAdapterErrorContract(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repo := initRepo(t)
+	nonRepo := t.TempDir()
+
+	tests := []struct {
+		name         string
+		run          func() error
+		wantIs       error
+		wantContains string
+		wantErr      bool
+	}{
+		{
+			name: "head sha non repo",
+			run: func() error {
+				_, err := HeadSHA(ctx, nonRepo)
+				return err
+			},
+			// NOTE: possible defect, see GAP F-011: this currently does not map to ErrNotGitRepository.
+			wantContains: "git rev-parse HEAD",
+		},
+		{
+			name: "branch non repo",
+			run: func() error {
+				_, err := Branch(ctx, nonRepo)
+				return err
+			},
+			// NOTE: possible defect, see GAP F-011: this currently does not map to ErrNotGitRepository.
+			wantContains: "git rev-parse --abbrev-ref HEAD",
+		},
+		{
+			name: "validate ref flag",
+			run: func() error {
+				return ValidateRef(ctx, repo, "-flag")
+			},
+			wantIs: apperrors.ErrInvalidGitRef,
+		},
+		{
+			name: "validate ref nul",
+			run: func() error {
+				return ValidateRef(ctx, repo, "bad\x00ref")
+			},
+			wantIs: apperrors.ErrInvalidGitRef,
+		},
+		{
+			name: "diff missing ref",
+			run: func() error {
+				_, err := Diff(ctx, repo, "no-such-ref-xyz")
+				return err
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.run()
+			if tt.wantIs != nil {
+				if !errors.Is(err, tt.wantIs) {
+					t.Fatalf("error = %v, want errors.Is %v", err, tt.wantIs)
+				}
+				return
+			}
+			if tt.wantContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantContains) {
+					t.Fatalf("error = %v, want containing %q", err, tt.wantContains)
+				}
+				return
+			}
+			if tt.wantErr && err == nil {
+				t.Fatal("error = nil, want non-nil error")
+			}
+		})
+	}
 }
 
 func TestParseNameStatusZ(t *testing.T) {
@@ -170,7 +285,10 @@ rename to new/name.go
 @@ -5 +5 @@ func Z() {
 +	tweak
 `
-	files := parseUnifiedDiff(out)
+	files, err := parseUnifiedDiff(out)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(files) != 4 {
 		t.Fatalf("parsed %d files, want 4: %+v", len(files), files)
 	}
@@ -194,8 +312,28 @@ rename to new/name.go
 	}
 }
 
+func TestParseDiffRejectsMalformedHunkHeader(t *testing.T) {
+	out := `diff --git a/internal/x/y.go b/internal/x/y.go
+index 111..222 100644
+--- a/internal/x/y.go
++++ b/internal/x/y.go
+@@ -abc,2 +3,4 @@
++added
+`
+	_, err := parseUnifiedDiff(out)
+	if err == nil {
+		t.Fatal("parseUnifiedDiff error = nil, want malformed hunk error")
+	}
+	if !strings.Contains(err.Error(), "hunk") {
+		t.Fatalf("parseUnifiedDiff error = %q, want hunk context", err.Error())
+	}
+}
+
 func TestParseHunkHeaderSingleLine(t *testing.T) {
-	h, ok := parseHunkHeader("@@ -40 +41 @@ func Bar() {")
+	h, ok, err := parseHunkHeader("@@ -40 +41 @@ func Bar() {")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok || h != (Hunk{Start: 41, End: 41}) {
 		t.Errorf("single-line hunk = %v ok=%v, want {41 41}", h, ok)
 	}

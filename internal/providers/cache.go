@@ -10,7 +10,7 @@ import (
 
 // CacheVersion is bumped whenever the on-disk format or the tagging/resolution logic
 // changes in a way that would make a stored index stale. A mismatch forces a rebuild.
-const CacheVersion = 6
+const CacheVersion = 7
 
 const cacheVersion = CacheVersion
 

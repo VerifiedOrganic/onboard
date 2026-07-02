@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 const cargoMetadataTimeout = 20 * time.Second
@@ -33,6 +35,22 @@ type cargoMetadataJSON struct {
 			Edition    string   `json:"edition"`
 		} `json:"targets"`
 	} `json:"packages"`
+}
+
+type cargoTomlManifest struct {
+	Package struct {
+		Name    string `toml:"name"`
+		Version string `toml:"version"`
+	} `toml:"package"`
+	Dependencies    map[string]any `toml:"dependencies"`
+	DevDependencies map[string]any `toml:"dev-dependencies"`
+	Workspace       struct {
+		Dependencies map[string]any `toml:"dependencies"`
+	} `toml:"workspace"`
+	Target map[string]struct {
+		Dependencies    map[string]any `toml:"dependencies"`
+		DevDependencies map[string]any `toml:"dev-dependencies"`
+	} `toml:"target"`
 }
 
 // LoadCargoMetadata runs `cargo metadata --no-deps` when cargo is available.
@@ -106,6 +124,48 @@ func ParseCargoMetadata(root string, data []byte) map[string]ManifestDeps {
 		out[rel] = md
 	}
 	return out
+}
+
+func parseCargoToml(rel string, data []byte) (ManifestDeps, bool) {
+	var raw cargoTomlManifest
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return ManifestDeps{}, false
+	}
+
+	md := ManifestDeps{Manifest: rel, Ecosystem: "Rust", Module: raw.Package.Name}
+	appendCargoTomlDeps(&md, raw.Dependencies, "normal", false, "")
+	appendCargoTomlDeps(&md, raw.DevDependencies, "dev", true, "")
+	appendCargoTomlDeps(&md, raw.Workspace.Dependencies, "workspace", false, "")
+	for target, deps := range raw.Target {
+		appendCargoTomlDeps(&md, deps.Dependencies, "normal", false, target)
+		appendCargoTomlDeps(&md, deps.DevDependencies, "dev", true, target)
+	}
+	sortDeps(md.Direct)
+	return md, true
+}
+
+func appendCargoTomlDeps(md *ManifestDeps, deps map[string]any, kind string, dev bool, target string) {
+	for name, value := range deps {
+		md.Direct = append(md.Direct, Dependency{
+			Name:    name,
+			Version: cargoTomlDepVersion(value),
+			Kind:    kind,
+			Target:  target,
+			Dev:     dev,
+		})
+	}
+}
+
+func cargoTomlDepVersion(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case map[string]any:
+		if version, ok := v["version"].(string); ok {
+			return version
+		}
+	}
+	return ""
 }
 
 func canonicalPath(path string) string {

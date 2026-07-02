@@ -5,8 +5,17 @@ import (
 	"time"
 
 	"github.com/VerifiedOrganic/onboard/internal/git"
+	"github.com/VerifiedOrganic/onboard/internal/graph"
 	"github.com/VerifiedOrganic/onboard/internal/guide"
+	"github.com/VerifiedOrganic/onboard/internal/providers"
 )
+
+// GraphIndexer is the server's consumer-shaped port onto the indexing service.
+type GraphIndexer interface {
+	Index(ctx context.Context, root string, refresh, precise bool) (*providers.Graph, error)
+}
+
+var _ GraphIndexer = (*graph.Service)(nil)
 
 // GitPort is the git operations MCP tools require.
 type GitPort interface {

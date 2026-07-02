@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -111,6 +112,89 @@ func TestIndexWithoutCacheStillWorks(t *testing.T) {
 	}
 	if !containsSubstr(calleesOf(g, "G"), "F") {
 		t.Error("G should call F even without a cache")
+	}
+}
+
+func TestDiskCacheRoundTripPreservesAllFields(t *testing.T) {
+	t.Parallel()
+
+	symbol := &providers.Symbol{
+		QName:  "src/service.go::Service.Handle",
+		Name:   "Handle",
+		Kind:   "method",
+		File:   "src/service.go",
+		Line:   12,
+		Column: 8,
+		Lang:   "go",
+		Recv:   "Service",
+		Test:   true,
+		Public: true,
+	}
+	assertNoZeroExportedFields(t, "providers.Symbol", *symbol)
+
+	resolvedImport := providers.ResolvedImport{
+		TargetFile: "src/dependency.go",
+		TargetName: "Dependency",
+	}
+	assertNoZeroExportedFields(t, "providers.ResolvedImport", resolvedImport)
+	imports := map[string]providers.ResolvedImport{
+		"dep": resolvedImport,
+	}
+
+	cache := filepath.Join(t.TempDir(), "cache", "index.json")
+	providers.SaveDiskIndex(cache, &providers.DiskIndex{
+		Version: providers.CacheVersion,
+		Files: map[string]providers.DiskFile{
+			"src/service.go": {
+				Hash:    "non-empty-hash",
+				Lang:    "go",
+				Defs:    []*providers.Symbol{symbol},
+				Imports: providers.ToDiskImports(imports),
+			},
+		},
+	})
+
+	loaded := providers.LoadDiskIndex(cache)
+	if loaded == nil {
+		t.Fatal("LoadDiskIndex returned nil")
+	}
+	file, ok := loaded.Files["src/service.go"]
+	if !ok {
+		t.Fatalf("loaded files = %v, want src/service.go", loaded.Files)
+	}
+	if len(file.Defs) != 1 {
+		t.Fatalf("loaded defs len = %d, want 1", len(file.Defs))
+	}
+	if !reflect.DeepEqual(*symbol, *file.Defs[0]) {
+		t.Fatalf("symbol round-trip mismatch:\n got: %#v\nwant: %#v", *file.Defs[0], *symbol)
+	}
+
+	loadedImports := providers.FromDiskImports(file.Imports)
+	if !reflect.DeepEqual(imports, loadedImports) {
+		t.Fatalf("resolved import round-trip mismatch:\n got: %#v\nwant: %#v", loadedImports, imports)
+	}
+}
+
+func assertNoZeroExportedFields(t *testing.T, name string, value any) {
+	t.Helper()
+
+	v := reflect.ValueOf(value)
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
+	typ := v.Type()
+	var zeroFields []string
+	for i := range v.NumField() {
+		field := typ.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		if v.Field(i).IsZero() {
+			zeroFields = append(zeroFields, field.Name)
+		}
+	}
+	if len(zeroFields) > 0 {
+		t.Fatalf("%s fixture has zero exported fields: %s", name, strings.Join(zeroFields, ", "))
 	}
 }
 
