@@ -71,6 +71,51 @@ func TestParseCargoMetadataAddsTargetsAndKinds(t *testing.T) {
 	}
 }
 
+func TestCargoTomlFallbackParsesDependencies(t *testing.T) {
+	root := t.TempDir()
+	manifest := filepath.Join(root, "Cargo.toml")
+	if err := os.WriteFile(manifest, []byte(`[package]
+name = "fixture"
+version = "0.1.0"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+anyhow = "1"
+
+[dev-dependencies]
+proptest = "1.4"
+
+[workspace.dependencies]
+tokio = "1.38"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	md, ok := ParseManifest(root, manifest, "Cargo.toml")
+	if !ok {
+		t.Fatal("ParseManifest returned ok=false")
+	}
+	if md.Module != "fixture" || md.Ecosystem != "Rust" {
+		t.Fatalf("module/ecosystem = %q/%q, want fixture/Rust", md.Module, md.Ecosystem)
+	}
+	assertCargoDep(t, md, "serde", "1.0", "normal", false)
+	assertCargoDep(t, md, "anyhow", "1", "normal", false)
+	assertCargoDep(t, md, "proptest", "1.4", "dev", true)
+	assertCargoDep(t, md, "tokio", "1.38", "workspace", false)
+}
+
+func assertCargoDep(t *testing.T, md ManifestDeps, name, version, kind string, dev bool) {
+	t.Helper()
+
+	dep, ok := depByName(md, name)
+	if !ok {
+		t.Fatalf("dependency %q missing from %+v", name, md.Direct)
+	}
+	if dep.Version != version || dep.Kind != kind || dep.Dev != dev {
+		t.Fatalf("%s = version %q kind %q dev %v, want %q/%q/%v", name, dep.Version, dep.Kind, dep.Dev, version, kind, dev)
+	}
+}
+
 func TestLoadCargoMetadataWhenCargoAvailable(t *testing.T) {
 	if _, err := exec.LookPath("cargo"); err != nil {
 		testenv.SkipUnlessTool(t, "cargo not installed")

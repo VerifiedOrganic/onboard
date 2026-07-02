@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -15,7 +14,7 @@ import (
 // Per-ecosystem manifest parsers for the deps tool. Each reads direct dependencies (and, for
 // Go, counts indirect ones) from one manifest format. go.mod uses the real x/mod parser;
 // package.json and requirements.txt use encoding/json and line parsing; Cargo.toml uses a
-// deliberately small section reader rather than a full TOML dependency.
+// TOML parser.
 
 // Dependency is one direct dependency entry from a manifest.
 type Dependency struct {
@@ -315,118 +314,6 @@ func requirementName(s string) string {
 func stripRequirementComment(line string) string {
 	for i := 0; i < len(line); i++ {
 		if line[i] == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t') {
-			return strings.TrimSpace(line[:i])
-		}
-	}
-	return line
-}
-
-func parseCargoToml(rel string, data []byte) (ManifestDeps, bool) {
-	md := ManifestDeps{Manifest: rel, Ecosystem: "Rust"}
-	section := ""
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(stripTomlComment(line))
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "[") {
-			section = strings.Trim(line, "[]")
-			continue
-		}
-		if section == "package" {
-			if name, val := parseTomlAssignment(line); name == "name" {
-				md.Module = tomlString(val)
-			}
-			continue
-		}
-		dev, ok := cargoDependencySection(section)
-		if !ok {
-			continue
-		}
-		name, ver := parseCargoDep(line)
-		if name != "" {
-			md.Direct = append(md.Direct, Dependency{Name: name, Version: ver, Dev: dev})
-		}
-	}
-	sortDeps(md.Direct)
-	return md, true
-}
-
-func cargoDependencySection(section string) (dev, ok bool) {
-	switch section {
-	case "dependencies":
-		return false, true
-	case "dev-dependencies":
-		return true, true
-	}
-	if strings.HasPrefix(section, "target.") {
-		switch {
-		case strings.HasSuffix(section, ".dependencies"):
-			return false, true
-		case strings.HasSuffix(section, ".dev-dependencies"):
-			return true, true
-		}
-	}
-	return false, false
-}
-
-func parseCargoDep(line string) (string, string) {
-	name, rhs := parseTomlAssignment(line)
-	if name == "" {
-		return "", ""
-	}
-	if strings.HasPrefix(rhs, "{") {
-		return name, tomlInlineStringField(rhs, "version")
-	}
-	return name, tomlString(rhs)
-}
-
-func parseTomlAssignment(line string) (string, string) {
-	eq := strings.IndexByte(line, '=')
-	if eq < 0 {
-		return "", ""
-	}
-	name := strings.TrimSpace(line[:eq])
-	rhs := strings.TrimSpace(line[eq+1:])
-	return strings.Trim(name, "\"'"), rhs
-}
-
-func tomlInlineStringField(table, field string) string {
-	for _, part := range strings.Split(strings.Trim(table, "{}"), ",") {
-		name, rhs := parseTomlAssignment(part)
-		if name == field {
-			return tomlString(rhs)
-		}
-	}
-	return ""
-}
-
-func tomlString(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "\"") {
-		if v, err := strconv.Unquote(s); err == nil {
-			return v
-		}
-	}
-	if strings.HasPrefix(s, "'") && strings.HasSuffix(s, "'") {
-		return strings.Trim(s, "'")
-	}
-	return strings.Trim(s, "\"'")
-}
-
-func stripTomlComment(line string) string {
-	inSingle, inDouble, escaped := false, false, false
-	for i, r := range line {
-		switch {
-		case escaped:
-			escaped = false
-		case inDouble && r == '\\':
-			escaped = true
-		case !inDouble && r == '\'':
-			inSingle = !inSingle
-		case !inSingle && r == '"':
-			inDouble = !inDouble
-		case !inSingle && !inDouble && r == '#':
 			return strings.TrimSpace(line[:i])
 		}
 	}
