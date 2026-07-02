@@ -8,6 +8,7 @@ import (
 )
 
 var langTagsOverrides = map[string]string{
+	"go":         GoTagsQuery,
 	"rust":       RustTagsQuery,
 	"javascript": JSTagsQuery,
 	"typescript": TSTagsQuery,
