@@ -157,6 +157,86 @@ func TestDiffNameStatus(t *testing.T) {
 	}
 }
 
+func TestGitAdapterErrorContract(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repo := initRepo(t)
+	nonRepo := t.TempDir()
+
+	tests := []struct {
+		name         string
+		run          func() error
+		wantIs       error
+		wantContains string
+		wantErr      bool
+	}{
+		{
+			name: "head sha non repo",
+			run: func() error {
+				_, err := HeadSHA(ctx, nonRepo)
+				return err
+			},
+			// NOTE: possible defect, see GAP F-011: this currently does not map to ErrNotGitRepository.
+			wantContains: "git rev-parse HEAD",
+		},
+		{
+			name: "branch non repo",
+			run: func() error {
+				_, err := Branch(ctx, nonRepo)
+				return err
+			},
+			// NOTE: possible defect, see GAP F-011: this currently does not map to ErrNotGitRepository.
+			wantContains: "git rev-parse --abbrev-ref HEAD",
+		},
+		{
+			name: "validate ref flag",
+			run: func() error {
+				return ValidateRef(ctx, repo, "-flag")
+			},
+			wantIs: apperrors.ErrInvalidGitRef,
+		},
+		{
+			name: "validate ref nul",
+			run: func() error {
+				return ValidateRef(ctx, repo, "bad\x00ref")
+			},
+			wantIs: apperrors.ErrInvalidGitRef,
+		},
+		{
+			name: "diff missing ref",
+			run: func() error {
+				_, err := Diff(ctx, repo, "no-such-ref-xyz")
+				return err
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.run()
+			if tt.wantIs != nil {
+				if !errors.Is(err, tt.wantIs) {
+					t.Fatalf("error = %v, want errors.Is %v", err, tt.wantIs)
+				}
+				return
+			}
+			if tt.wantContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantContains) {
+					t.Fatalf("error = %v, want containing %q", err, tt.wantContains)
+				}
+				return
+			}
+			if tt.wantErr && err == nil {
+				t.Fatal("error = nil, want non-nil error")
+			}
+		})
+	}
+}
+
 func TestParseNameStatusZ(t *testing.T) {
 	changes := parseNameStatusZ("M\x00space name.txt\x00R100\x00old name.go\x00new name.go\x00C75\x00old copy.go\x00new copy.go\x00")
 	if len(changes) != 3 {
