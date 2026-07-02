@@ -49,11 +49,10 @@ func TestIntegrationRootPolicyAllowsListedRoot(t *testing.T) {
 func TestResolveRootRejectsOutsidePolicy(t *testing.T) {
 	base := t.TempDir()
 	other := t.TempDir()
-	resetDeps()
-	t.Cleanup(resetDeps)
-	Configure(WithRootPolicy(pathutil.NewRootPolicy(base)))
+	deps := newDeps(WithRootPolicy(pathutil.NewRootPolicy(base)))
+	ctx := contextWithDeps(context.Background(), deps)
 
-	_, err := resolveRoot(context.Background(), other)
+	_, err := resolveRoot(ctx, other)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -68,11 +67,10 @@ func TestResolveRootAllowsNestedUnderPolicy(t *testing.T) {
 	if err := os.MkdirAll(nested, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	resetDeps()
-	t.Cleanup(resetDeps)
-	Configure(WithRootPolicy(pathutil.NewRootPolicy(base)))
+	deps := newDeps(WithRootPolicy(pathutil.NewRootPolicy(base)))
+	ctx := contextWithDeps(context.Background(), deps)
 
-	got, err := resolveRoot(context.Background(), nested)
+	got, err := resolveRoot(ctx, nested)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/VerifiedOrganic/onboard/internal/graph"
@@ -32,10 +31,7 @@ func defaultDeps() Deps {
 	}
 }
 
-var (
-	serverDepsMu sync.RWMutex
-	serverDeps   = defaultDeps()
-)
+var baseDeps = defaultDeps()
 
 // Option configures server dependencies.
 type Option func(*Deps)
@@ -58,16 +54,6 @@ func newDeps(opts ...Option) *Deps {
 	return &d
 }
 
-// Configure applies options to the package-level dependency set.
-func Configure(opts ...Option) {
-	serverDepsMu.Lock()
-	defer serverDepsMu.Unlock()
-
-	for _, o := range opts {
-		o(&serverDeps)
-	}
-}
-
 func contextWithDeps(ctx context.Context, deps *Deps) context.Context {
 	return context.WithValue(ctx, depsContextKey{}, deps)
 }
@@ -77,9 +63,7 @@ func depsForContext(ctx context.Context) Deps {
 		return *deps
 	}
 
-	serverDepsMu.RLock()
-	defer serverDepsMu.RUnlock()
-	return serverDeps
+	return baseDeps
 }
 
 func resolveRoot(ctx context.Context, root string) (string, error) {
@@ -100,11 +84,4 @@ func logTool(ctx context.Context, name string, start time.Time, err error) {
 		attrs = append(attrs, "error", err.Error())
 	}
 	logger.InfoContext(ctx, "mcp tool", attrs...)
-}
-
-func resetDeps() {
-	serverDepsMu.Lock()
-	defer serverDepsMu.Unlock()
-
-	serverDeps = defaultDeps()
 }
