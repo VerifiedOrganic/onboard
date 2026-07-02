@@ -61,6 +61,19 @@ loopback unless you put it behind your own auth, TLS, and network controls.
 New here? **[docs/getting-started.md](docs/getting-started.md)** is the unhurried version
 of the above, with what-you-should-see at each step.
 
+## Testing
+
+Use `make test` for the standard local suite and `make test-race` when touching concurrent
+code. `make check` is the full local CI gate: tidy check, gofmt check, vet, pinned
+golangci-lint, and tests. CI enforces a 65% coverage floor; use `make cover` to inspect
+the current total locally.
+
+## Architecture
+
+The implementation overview lives in [docs/architecture.md](docs/architecture.md),
+including the current Mermaid architecture diagram. Start there before changing server
+ports, graph indexing, installers, or transport boundaries.
+
 ## What you actually get
 
 Two halves of one idea — *how* to teach a codebase, and *the facts* to teach from:
